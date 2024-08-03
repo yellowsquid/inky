@@ -1,0 +1,8 @@
+package inky
+authors = "Greg Brown"
+sourcedir = "src"
+
+options = "--total"
+
+modules
+  = Inky

@@ -71,16 +71,16 @@ BS = S
 -- Binders to names ------------------------------------------------------------
 
 export
-name : forall w. (b : Binder) -> Name (w :< b)
-name b = Element b ((snocSem w b b).rightToLeft (Left Refl))
+nameOf : forall w. (b : Binder) -> Name (w :< b)
+nameOf b = Element b ((snocSem w b b).rightToLeft (Left Refl))
 
 export
 binder : Name w -> Binder
 binder = fst
 
 export
-binderName : binder {w = w :< b} (name {w} b) = b
-binderName = Refl
+binderNameOf : binder {w = w :< b} (nameOf {w} b) = b
+binderNameOf = Refl
 
 -- Empty world -----------------------------------------------------------------
 
@@ -115,6 +115,10 @@ strip (Element n member) =
             id $
             (snocSem w b n).leftToRight member))
 
+public export
+stripWith : {b : Binder} -> Lazy a -> Lazy (Name w -> a) -> Name (w :< b) -> a
+stripWith x f = maybe x f . strip
+
 -- Freshness -------------------------------------------------------------------
 
 export
@@ -135,7 +139,7 @@ soRecomputable : (0 s : So b) -> So b
 soRecomputable Oh = Oh
 
 export
-sucFresh : b `FreshIn` w -> S b `FreshIn` w :< b
+sucFresh : b `FreshIn` w -> BS b `FreshIn` w :< b
 sucFresh prf = soRecomputable (snocLength w b prf)
 
 -- World inclusion -------------------------------------------------------------

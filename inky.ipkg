@@ -6,3 +6,5 @@ options = "--total"
 
 modules
   = Inky.Binding
+  , Inky.Erased
+  , Inky.Kit

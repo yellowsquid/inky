@@ -1,6 +1,6 @@
 module Inky.Kit
 
-import Control.Monad.Identity
+import public Control.Monad.Identity
 import Inky.Binding
 import Inky.Erased
 

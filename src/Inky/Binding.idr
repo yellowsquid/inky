@@ -2,9 +2,11 @@ module Inky.Binding
 
 import Control.Relation
 import Control.Order
+import Data.Bool
 import Data.DPair
 import Data.List
 import Data.Nat
+import Data.Nat.Order.Properties
 import Data.So
 import Decidable.Equality
 
@@ -79,7 +81,6 @@ nameOf b = Element b.binder ((snocSem w.world b.binder b.binder).rightToLeft (Le
 export
 binder : Name w -> Binder
 binder = MkBinder . fst
-  -- fst
 
 export
 binderNameOf : (b : Binder) -> binder {w = w :< b} (nameOf {w} b) = b
@@ -283,3 +284,88 @@ stripCoerceSnoc :
 stripCoerceSnoc b lte (Element n member) with (decSo $ equalNat b.binder n)
   _ | Yes _ = Refl
   _ | No _ = cong (\prf => Just $ Element n prf) (memberUniq n v.world {})
+
+-- De Bruijn Utilities ---------------------------------------------------------
+
+public export
+(+) : World -> Nat -> World
+w + Z = w
+w + S n = WS (w + n)
+
+public export
+lift : World -> Nat -> World
+w `lift` Z = w
+w `lift` S n = shift (w `lift` n)
+
+public export
+plusMono : (k : Nat) -> w <= v -> w + k <= v + k
+plusMono Z lte = lte
+plusMono (S k) lte = sucMono (plusMono k lte)
+
+public export
+plusInjective : (k : Nat) -> w + k <= v + k -> w <= v
+plusInjective Z lte = lte
+plusInjective (S k) lte = plusInjective k (sucInjective lte)
+
+public export
+liftMono : {w, v : World} -> (k : Nat) -> w <= v -> (w `lift` k) <= (v `lift` k)
+liftMono Z lte = lte
+liftMono (S k) lte = shiftMono (liftMono k lte)
+
+public export
+liftInjective : (k : Nat) -> (w `lift` k) <= (v `lift` k) -> w <= v
+liftInjective Z lte = lte
+liftInjective (S k) lte = liftInjective k (shiftInjective lte)
+
+plusWorld : (0 w : World) -> (k : Nat) -> (w + k).world = replicate k False ++ w.world
+plusWorld w Z = Refl
+plusWorld w (S k) = cong (False ::) (plusWorld w k)
+
+liftWorld : (0 w : World) -> (k : Nat) -> (w `lift` k).world = replicate k True ++ w.world
+liftWorld w Z = Refl
+liftWorld w (S k) = cong (True ::) (liftWorld w k)
+
+plusMember : (k : Nat) -> Member n bs -> Member (k + n) (replicate k False ++ bs)
+plusMember Z prf = prf
+plusMember (S k) prf = plusMember k prf
+
+export
+plus : (k : Nat) -> Name w -> Name (w + k)
+plus k (Element n prf) = rewrite plusWorld w k in Element (k + n) (plusMember k prf)
+
+minusMember : {n : Nat} -> (k : Nat) -> Member n (replicate k False ++ bs) -> Member (n `minus` k) bs
+minusMember Z prf = rewrite minusZeroRight n in prf
+minusMember {n = S n} (S k) prf = minusMember k prf
+
+export
+minus : (k : Nat) -> Name (w + k) -> Name w
+minus k (Element n prf) =
+  Element (n `minus` k)
+    (minusMember {bs = w.world} k (rewrite sym $ plusWorld w k in prf))
+
+cmpLt : {n : Nat} -> n `LT` k -> Member n (replicate k True ++ bs) -> Member n (replicate k True ++ [])
+cmpLt {n = Z} (LTESucc prf) member = member
+cmpLt {n = S n} (LTESucc prf) member = cmpLt prf member
+
+cmpGte : n `GTE` k -> Member n (replicate k True ++ bs) -> Member n (replicate k False ++ bs)
+cmpGte LTEZero member = member
+cmpGte (LTESucc prf) member = cmpGte prf member
+
+export
+cmp : (k : Nat) -> Name (w `lift` k) -> Either (Name ([<] `lift` k)) (Name (w + k))
+cmp k (Element n member) =
+  case decSo $ n `lt` k of
+    Yes prf =>
+      Left $
+      Element n $
+      rewrite liftWorld [<] k in
+      cmpLt {bs = w.world} (ltIsLT n k $ soToEq prf) $
+      rewrite sym $ liftWorld w k in
+      member
+    No prf =>
+      Right $
+      Element n $
+      rewrite plusWorld w k in
+      cmpGte {bs = w.world} (notltIsGTE n k $ notTrueIsFalse $ prf . eqToSo) $
+      rewrite sym $ liftWorld w k in
+      member

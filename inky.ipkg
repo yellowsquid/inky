@@ -4,8 +4,13 @@ sourcedir = "src"
 
 options = "--total"
 
+depends = contrib
+
 modules
   = Inky.Binding
   , Inky.Env
   , Inky.Erased
+  , Inky.Kind
   , Inky.Kit
+  , Inky.OnlyWhen
+  , Inky.Type

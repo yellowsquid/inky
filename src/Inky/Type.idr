@@ -9,10 +9,10 @@ import Inky.OnlyWhen
 
 namespace Raw
   public export
-  data RawSTy : World -> Type where
+  data RawSTy : World -> Type
 
   public export
-  data RawCTy : World -> Type where
+  data RawCTy : World -> Type
 
   data RawSTy where
     TVar : (x : Name w) -> RawSTy w

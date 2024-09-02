@@ -19,7 +19,7 @@ namespace Raw
     TVar : (x : Name w) -> RawSTy w
     TNat : RawSTy w
     TArrow : RawCTy w -> RawCTy w -> RawSTy w
-    TSum : RawCTy w -> RawCTy w -> RawSTy w
+    TSum : List (RawCTy w) -> RawSTy w
     TProd : List (RawCTy w) -> RawSTy w
     TApp : RawSTy w -> RawCTy w -> RawSTy w
     TAnnot : RawCTy w -> Kind -> RawSTy w
@@ -37,7 +37,7 @@ data SynthKind where
   TVar : SynthKind env (TVar x) (lookup env x)
   TNat : SynthKind env TNat KStar
   TArrow : CheckKind env KStar t -> CheckKind env KStar u -> SynthKind env (t `TArrow` u) KStar
-  TSum : CheckKind env KStar t -> CheckKind env KStar u -> SynthKind env (t `TSum` u) KStar
+  TSum : All (CheckKind env KStar) ts -> SynthKind env (TSum ts) KStar
   TProd : All (CheckKind env KStar) ts -> SynthKind env (TProd ts) KStar
   TApp : SynthKind env f (k `KArrow` j) -> CheckKind env k t -> SynthKind env (f `TApp` t) j
   TAnnot : CheckKind env k t -> SynthKind env (TAnnot t k) k
@@ -51,7 +51,7 @@ synthKindUniq : SynthKind env t k -> SynthKind env t j -> k = j
 synthKindUniq TVar TVar = Refl
 synthKindUniq TNat TNat = Refl
 synthKindUniq (TArrow p1 p2) (TArrow p3 p4) = Refl
-synthKindUniq (TSum p1 p2) (TSum p3 p4) = Refl
+synthKindUniq (TSum ps1) (TSum ps2) = Refl
 synthKindUniq (TProd ps1) (TProd ps2) = Refl
 synthKindUniq (TApp p1 p2) (TApp p3 p4) = case (synthKindUniq p1 p3) of Refl => Refl
 synthKindUniq (TAnnot p1) (TAnnot p2) = Refl
@@ -69,9 +69,8 @@ synthKind env (TArrow t u) = do
   guard (checkKind env KStar t)
   guard (checkKind env KStar u)
   Just KStar
-synthKind env (TSum t u) = do
-  guard (checkKind env KStar t)
-  guard (checkKind env KStar u)
+synthKind env (TSum ts) = do
+  guard (checkAllKinds env KStar ts)
   Just KStar
 synthKind env (TProd ts) = do
   guard (checkAllKinds env KStar ts)
@@ -109,11 +108,9 @@ synthKindPrf env (TArrow t u) with (checkKindPrf env KStar t) | (checkKind env K
     _ | RTrue uStar | _ = Yes (TArrow tStar uStar)
     _ | RFalse uUnstar | _ = No (\_ => \case TArrow _ uStar => uUnstar uStar)
   _ | RFalse tUnstar | _ = No (\_ => \case TArrow tStar _ => tUnstar tStar)
-synthKindPrf env (TSum t u) with (checkKindPrf env KStar t) | (checkKind env KStar t)
-  _ | RTrue tStar | _ with (checkKindPrf env KStar u) | (checkKind env KStar u)
-    _ | RTrue uStar | _ = Yes (TSum tStar uStar)
-    _ | RFalse uUnstar | _ = No (\_ => \case TSum _ uStar => uUnstar uStar)
-  _ | RFalse tUnstar | _ = No (\_ => \case TSum tStar _ => tUnstar tStar)
+synthKindPrf env (TSum ts) with (checkAllKindsPrf env KStar ts) | (checkAllKinds env KStar ts)
+  _ | RTrue tsStar | _ = Yes (TSum tsStar)
+  _ | RFalse tsUnstar | _ = No (\_ => \case TSum tsStar => tsUnstar tsStar)
 synthKindPrf env (TProd ts) with (checkAllKindsPrf env KStar ts) | (checkAllKinds env KStar ts)
   _ | RTrue tsStar | _ = Yes (TProd tsStar)
   _ | RFalse tsUnstar | _ = No (\_ => \case TProd tsStar => tsUnstar tsStar)

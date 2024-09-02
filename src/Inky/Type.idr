@@ -2,6 +2,7 @@ module Inky.Type
 
 import Data.Bool.Decidable
 import public Data.DPair
+import public Data.List.Quantifiers
 import Inky.Binding
 import Inky.Env
 import Inky.Kind
@@ -18,6 +19,8 @@ namespace Raw
     TVar : (x : Name w) -> RawSTy w
     TNat : RawSTy w
     TArrow : RawCTy w -> RawCTy w -> RawSTy w
+    TSum : RawCTy w -> RawCTy w -> RawSTy w
+    TProd : List (RawCTy w) -> RawSTy w
     TApp : RawSTy w -> RawCTy w -> RawSTy w
     TAnnot : RawCTy w -> Kind -> RawSTy w
 
@@ -34,6 +37,8 @@ data SynthKind where
   TVar : SynthKind env (TVar x) (lookup env x)
   TNat : SynthKind env TNat KStar
   TArrow : CheckKind env KStar t -> CheckKind env KStar u -> SynthKind env (t `TArrow` u) KStar
+  TSum : CheckKind env KStar t -> CheckKind env KStar u -> SynthKind env (t `TSum` u) KStar
+  TProd : All (CheckKind env KStar) ts -> SynthKind env (TProd ts) KStar
   TApp : SynthKind env f (k `KArrow` j) -> CheckKind env k t -> SynthKind env (f `TApp` t) j
   TAnnot : CheckKind env k t -> SynthKind env (TAnnot t k) k
 
@@ -46,6 +51,8 @@ synthKindUniq : SynthKind env t k -> SynthKind env t j -> k = j
 synthKindUniq TVar TVar = Refl
 synthKindUniq TNat TNat = Refl
 synthKindUniq (TArrow p1 p2) (TArrow p3 p4) = Refl
+synthKindUniq (TSum p1 p2) (TSum p3 p4) = Refl
+synthKindUniq (TProd ps1) (TProd ps2) = Refl
 synthKindUniq (TApp p1 p2) (TApp p3 p4) = case (synthKindUniq p1 p3) of Refl => Refl
 synthKindUniq (TAnnot p1) (TAnnot p2) = Refl
 
@@ -54,11 +61,20 @@ synthKind : (env : Env Kind w) -> (a : RawSTy w) -> Maybe Kind
 export
 checkKind : (env : Env Kind w) -> (k : Kind) -> (t : RawCTy w) -> Bool
 
+checkAllKinds : (env : Env Kind w) -> (k : Kind) -> (ts : List (RawCTy w)) -> Bool
+
 synthKind env (TVar x) = Just (lookup env x)
 synthKind env TNat = Just KStar
 synthKind env (TArrow t u) = do
   guard (checkKind env KStar t)
   guard (checkKind env KStar u)
+  Just KStar
+synthKind env (TSum t u) = do
+  guard (checkKind env KStar t)
+  guard (checkKind env KStar u)
+  Just KStar
+synthKind env (TProd ts) = do
+  guard (checkAllKinds env KStar ts)
   Just KStar
 synthKind env (TApp f t) = do
   dom `KArrow` cod <- synthKind env f
@@ -75,10 +91,16 @@ checkKind env k (TEmbed a) =
     Nothing => False
     Just k' => k == k'
 
+checkAllKinds env k [] = True
+checkAllKinds env k (t :: ts) = checkKind env k t && checkAllKinds env k ts
+
 export
 synthKindPrf : (env : Env Kind w) -> (a : RawSTy w) -> synthKind env a `OnlyWhen` SynthKind env a
 export
 checkKindPrf : (env : Env Kind w) -> (k : Kind) -> (t : RawCTy w) -> CheckKind env k t `Reflects` checkKind env k t
+checkAllKindsPrf :
+  (env : Env Kind w) -> (k : Kind) ->
+  (ts : List (RawCTy w)) -> All (CheckKind env k) ts `Reflects` checkAllKinds env k ts
 
 synthKindPrf env (TVar x) = Yes TVar
 synthKindPrf env TNat = Yes TNat
@@ -87,6 +109,14 @@ synthKindPrf env (TArrow t u) with (checkKindPrf env KStar t) | (checkKind env K
     _ | RTrue uStar | _ = Yes (TArrow tStar uStar)
     _ | RFalse uUnstar | _ = No (\_ => \case TArrow _ uStar => uUnstar uStar)
   _ | RFalse tUnstar | _ = No (\_ => \case TArrow tStar _ => tUnstar tStar)
+synthKindPrf env (TSum t u) with (checkKindPrf env KStar t) | (checkKind env KStar t)
+  _ | RTrue tStar | _ with (checkKindPrf env KStar u) | (checkKind env KStar u)
+    _ | RTrue uStar | _ = Yes (TSum tStar uStar)
+    _ | RFalse uUnstar | _ = No (\_ => \case TSum _ uStar => uUnstar uStar)
+  _ | RFalse tUnstar | _ = No (\_ => \case TSum tStar _ => tUnstar tStar)
+synthKindPrf env (TProd ts) with (checkAllKindsPrf env KStar ts) | (checkAllKinds env KStar ts)
+  _ | RTrue tsStar | _ = Yes (TProd tsStar)
+  _ | RFalse tsUnstar | _ = No (\_ => \case TProd tsStar => tsUnstar tsStar)
 synthKindPrf env (TApp f t) with (synthKindPrf env f) | (synthKind env f)
   _ | Yes fArrow | Just (KArrow dom cod) with (checkKindPrf env dom t) | (checkKind env dom t)
     _ | RTrue uDom | _ = Yes (TApp fArrow uDom)
@@ -108,6 +138,13 @@ checkKindPrf env k (TEmbed a) with (synthKindPrf env a) | (synthKind env a)
     _ | RTrue eq | _ = RTrue (TEmbed aKind eq)
     _ | RFalse neq | _ = RFalse (\case TEmbed aKind' eq => neq $ trans eq $ synthKindUniq aKind' aKind)
   _ | No aUnkind | _ = RFalse (\case TEmbed aKind Refl => aUnkind _ aKind)
+
+checkAllKindsPrf env k [] = RTrue []
+checkAllKindsPrf env k (t :: ts) with (checkKindPrf env k t) | (checkKind env k t)
+  _ | RFalse tUnkind | _ = RFalse (\case (tKind :: _) => tUnkind tKind)
+  _ | RTrue tKind | _  with (checkAllKindsPrf env k ts) | (checkAllKinds env k ts)
+    _ | RTrue tsKinds | _ = RTrue (tKind :: tsKinds)
+    _ | RFalse tsUnkinds | _ = RFalse (\case (_ :: tsKinds) => tsUnkinds tsKinds)
 
 public export
 ATy : {w : World} -> Env Kind w -> Type

@@ -1,7 +1,7 @@
 module Inky.Type
 
 import Data.Bool.Decidable
-import Data.DPair
+import public Data.DPair
 import Inky.Binding
 import Inky.Env
 import Inky.Kind
@@ -108,3 +108,7 @@ checkKindPrf env k (TEmbed a) with (synthKindPrf env a) | (synthKind env a)
     _ | RTrue eq | _ = RTrue (TEmbed aKind eq)
     _ | RFalse neq | _ = RFalse (\case TEmbed aKind' eq => neq $ trans eq $ synthKindUniq aKind' aKind)
   _ | No aUnkind | _ = RFalse (\case TEmbed aKind Refl => aUnkind _ aKind)
+
+public export
+ATy : {w : World} -> Env Kind w -> Type
+ATy env = Subset (RawCTy w) (CheckKind env KStar)

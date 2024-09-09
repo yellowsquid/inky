@@ -7,10 +7,6 @@ options = "--total"
 depends = contrib
 
 modules
-  = Inky.Binding
-  , Inky.Env
-  , Inky.Erased
-  , Inky.Kind
-  , Inky.Kit
-  , Inky.OnlyWhen
+  = Data.These.Decidable
+  , Inky.Thinning
   , Inky.Type

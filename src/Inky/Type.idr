@@ -12,13 +12,13 @@ import Inky.Thinning
 
 -- Utilities -------------------------------------------------------------------
 
-reflectEq : (i, j : Fin n) -> (i = j) `Reflects` (i == j)
-reflectEq FZ FZ = RTrue Refl
-reflectEq FZ (FS j) = RFalse absurd
-reflectEq (FS i) FZ = RFalse absurd
-reflectEq (FS i) (FS j) =
+reflectFinEq : (i, j : Fin n) -> (i = j) `Reflects` (i == j)
+reflectFinEq FZ FZ = RTrue Refl
+reflectFinEq FZ (FS j) = RFalse absurd
+reflectFinEq (FS i) FZ = RFalse absurd
+reflectFinEq (FS i) (FS j) =
   viaEquivalence (MkEquivalence (\prf => cong FS prf) injective)
-    (reflectEq i j)
+    (reflectFinEq i j)
 
 -- Definition ------------------------------------------------------------------
 
@@ -26,13 +26,127 @@ public export
 data Ty : Nat -> Type where
   TVar : Fin n -> Ty n
   TNat : Ty n
-  TArrow : List1 (Ty n) -> Ty n -> Ty n
+  TArrow : Ty n -> Ty n -> Ty n
   TUnion : List1 (Ty n) -> Ty n
   TProd : List (Ty n) -> Ty n
   TSum : List (Ty n) -> Ty n
   TFix : Ty (S n) -> Ty n
 
 %name Ty a, b, c
+
+export
+Injective TVar where
+  injective Refl = Refl
+
+-- Equality --------------------------------------------------------------------
+
+export
+eq : Ty n -> Ty n -> Bool
+eqAll : List (Ty n) -> List (Ty n) -> Bool
+eqAll1 : List1 (Ty n) -> List1 (Ty n) -> Bool
+
+TVar i `eq` TVar j = i == j
+TNat `eq` TNat = True
+TArrow a b `eq` TArrow c d = (a `eq` c) && (b `eq` d)
+TUnion as `eq` TUnion bs = as `eqAll1` bs
+TProd as `eq` TProd bs = as `eqAll` bs
+TSum as `eq` TSum bs = as `eqAll` bs
+TFix a `eq` TFix b = a `eq` b
+_ `eq` _ = False
+
+[] `eqAll` [] = True
+(a :: as) `eqAll` (b :: bs) = (a `eq` b) && (as `eqAll` bs)
+_ `eqAll` _ = False
+
+(a ::: as) `eqAll1` (b ::: bs) = (a `eq` b) && (as `eqAll` bs)
+
+public export
+Eq (Ty n) where
+  (==) = eq
+
+export
+reflectEq : (a, b : Ty n) -> (a = b) `Reflects` (a `eq` b)
+reflectEqAll : (as, bs : List (Ty n)) -> (as = bs) `Reflects` (as `eqAll` bs)
+reflectEqAll1 : (as, bs : List1 (Ty n)) -> (as = bs) `Reflects` (as `eqAll1` bs)
+
+reflectEq (TVar i) (TVar j) with (reflectFinEq i j) | (i == j)
+  _ | RTrue eq | _ = RTrue (cong TVar eq)
+  _ | RFalse neq | _ = RFalse (\eq => neq $ injective eq)
+reflectEq (TVar i) TNat = RFalse (\case Refl impossible)
+reflectEq (TVar i) (TArrow c d) = RFalse (\case Refl impossible)
+reflectEq (TVar i) (TUnion c) = RFalse (\case Refl impossible)
+reflectEq (TVar i) (TProd c) = RFalse (\case Refl impossible)
+reflectEq (TVar i) (TSum c) = RFalse (\case Refl impossible)
+reflectEq (TVar i) (TFix b) = RFalse (\case Refl impossible)
+reflectEq TNat (TVar j) = RFalse (\case Refl impossible)
+reflectEq TNat TNat = RTrue Refl
+reflectEq TNat (TArrow c d) = RFalse (\case Refl impossible)
+reflectEq TNat (TUnion c) = RFalse (\case Refl impossible)
+reflectEq TNat (TProd c) = RFalse (\case Refl impossible)
+reflectEq TNat (TSum c) = RFalse (\case Refl impossible)
+reflectEq TNat (TFix b) = RFalse (\case Refl impossible)
+reflectEq (TArrow a b) (TVar j) = RFalse (\case Refl impossible)
+reflectEq (TArrow a b) TNat = RFalse (\case Refl impossible)
+reflectEq (TArrow a b) (TArrow c d) with (reflectEq a c) | (a `eq` c)
+  _ | RTrue eq1 | _ with (reflectEq b d) | (b `eq` d)
+    _ | RTrue eq2 | _ = RTrue (cong2 TArrow eq1 eq2)
+    _ | RFalse neq2 | _ = RFalse (\case Refl => neq2 Refl)
+  _ | RFalse neq1 | _ = RFalse (\case Refl => neq1 Refl)
+reflectEq (TArrow a b) (TUnion c) = RFalse (\case Refl impossible)
+reflectEq (TArrow a b) (TProd c) = RFalse (\case Refl impossible)
+reflectEq (TArrow a b) (TSum c) = RFalse (\case Refl impossible)
+reflectEq (TArrow a b) (TFix c) = RFalse (\case Refl impossible)
+reflectEq (TUnion as) (TVar j) = RFalse (\case Refl impossible)
+reflectEq (TUnion as) TNat = RFalse (\case Refl impossible)
+reflectEq (TUnion as) (TArrow c d) = RFalse (\case Refl impossible)
+reflectEq (TUnion as) (TUnion c) with (reflectEqAll1 as c) | (as `eqAll1` c)
+  _ | RTrue eq | _ = RTrue (cong TUnion eq)
+  _ | RFalse neq | _ = RFalse (\case Refl => neq Refl)
+reflectEq (TUnion as) (TProd c) = RFalse (\case Refl impossible)
+reflectEq (TUnion as) (TSum c) = RFalse (\case Refl impossible)
+reflectEq (TUnion as) (TFix b) = RFalse (\case Refl impossible)
+reflectEq (TProd as) (TVar j) = RFalse (\case Refl impossible)
+reflectEq (TProd as) TNat = RFalse (\case Refl impossible)
+reflectEq (TProd as) (TArrow c d) = RFalse (\case Refl impossible)
+reflectEq (TProd as) (TUnion c) = RFalse (\case Refl impossible)
+reflectEq (TProd as) (TProd c) with (reflectEqAll as c) | (as `eqAll` c)
+  _ | RTrue eq | _ = RTrue (cong TProd eq)
+  _ | RFalse neq | _ = RFalse (\case Refl => neq Refl)
+reflectEq (TProd as) (TSum c) = RFalse (\case Refl impossible)
+reflectEq (TProd as) (TFix b) = RFalse (\case Refl impossible)
+reflectEq (TSum as) (TVar j) = RFalse (\case Refl impossible)
+reflectEq (TSum as) TNat = RFalse (\case Refl impossible)
+reflectEq (TSum as) (TArrow c d) = RFalse (\case Refl impossible)
+reflectEq (TSum as) (TUnion c) = RFalse (\case Refl impossible)
+reflectEq (TSum as) (TProd c) = RFalse (\case Refl impossible)
+reflectEq (TSum as) (TSum c) with (reflectEqAll as c) | (as `eqAll` c)
+  _ | RTrue eq | _ = RTrue (cong TSum eq)
+  _ | RFalse neq | _ = RFalse (\case Refl => neq Refl)
+reflectEq (TSum as) (TFix b) = RFalse (\case Refl impossible)
+reflectEq (TFix a) (TVar j) = RFalse (\case Refl impossible)
+reflectEq (TFix a) TNat = RFalse (\case Refl impossible)
+reflectEq (TFix a) (TArrow c d) = RFalse (\case Refl impossible)
+reflectEq (TFix a) (TUnion c) = RFalse (\case Refl impossible)
+reflectEq (TFix a) (TProd c) = RFalse (\case Refl impossible)
+reflectEq (TFix a) (TSum c) = RFalse (\case Refl impossible)
+reflectEq (TFix a) (TFix b) with (reflectEq a b) | (a `eq` b)
+  _ | RTrue eq | _ = RTrue (cong TFix eq)
+  _ | RFalse neq | _ = RFalse (\case Refl => neq Refl)
+
+reflectEqAll [] [] = RTrue Refl
+reflectEqAll [] (b :: bs) = RFalse (\case Refl impossible)
+reflectEqAll (a :: as) [] = RFalse (\case Refl impossible)
+reflectEqAll (a :: as) (b :: bs) with (reflectEq a b) | (a `eq` b)
+  _ | RTrue eq1 | _ with (reflectEqAll as bs) | (as `eqAll` bs)
+    _ | RTrue eq2 | _ = RTrue (cong2 (::) eq1 eq2)
+    _ | RFalse neq2 | _ = RFalse (\case Refl => neq2 Refl)
+  _ | RFalse neq1 | _ = RFalse (\case Refl => neq1 Refl)
+
+reflectEqAll1 (a ::: as) (b ::: bs) with (reflectEq a b) | (a `eq` b)
+  _ | RTrue eq1 | _ with (reflectEqAll as bs) | (as `eqAll` bs)
+    _ | RTrue eq2 | _ = RTrue (cong2 (:::) eq1 eq2)
+    _ | RFalse neq2 | _ = RFalse (\case Refl => neq2 Refl)
+  _ | RFalse neq1 | _ = RFalse (\case Refl => neq1 Refl)
 
 -- Occurs ----------------------------------------------------------------------
 
@@ -42,7 +156,7 @@ OccursInAny1 : Fin n -> List1 (Ty n) -> Type
 
 i `OccursIn` TVar j = i = j
 i `OccursIn` TNat = Void
-i `OccursIn` TArrow as b = These (i `OccursInAny1` as) (i `OccursIn` b)
+i `OccursIn` TArrow a b = These (i `OccursIn` a) (i `OccursIn` b)
 i `OccursIn` TUnion as = i `OccursInAny1` as
 i `OccursIn` TProd as = i `OccursInAny` as
 i `OccursIn` TSum as = i `OccursInAny` as
@@ -71,7 +185,7 @@ reflectOccursInAny1 :
 
 i `occursIn` (TVar j) = i == j
 i `occursIn` TNat = False
-i `occursIn` (TArrow as b) = (i `occursInAny1` as) || (i `occursIn` b)
+i `occursIn` (TArrow a b) = (i `occursIn` a) || (i `occursIn` b)
 i `occursIn` (TUnion as) = i `occursInAny1` as
 i `occursIn` (TProd as) = i `occursInAny` as
 i `occursIn` (TSum as) = i `occursInAny` as
@@ -82,9 +196,9 @@ i `occursInAny` (a :: as) = (i `occursIn` a) || (i `occursInAny` as)
 
 i `occursInAny1` (a ::: as) = (i `occursIn` a) || (i `occursInAny` as)
 
-reflectOccursIn i (TVar j) = reflectEq i j
+reflectOccursIn i (TVar j) = reflectFinEq i j
 reflectOccursIn i TNat = RFalse id
-reflectOccursIn i (TArrow as b) = reflectThese (reflectOccursInAny1 i as) (reflectOccursIn i b)
+reflectOccursIn i (TArrow a b) = reflectThese (reflectOccursIn i a) (reflectOccursIn i b)
 reflectOccursIn i (TUnion as) = reflectOccursInAny1 i as
 reflectOccursIn i (TProd as) = reflectOccursInAny i as
 reflectOccursIn i (TSum as) = reflectOccursInAny i as
@@ -105,7 +219,7 @@ NotPositiveInAny1 : Fin n -> List1 (Ty n) -> Type
 
 i `NotPositiveIn` TVar j = Void
 i `NotPositiveIn` TNat = Void
-i `NotPositiveIn` TArrow as b = These (i `OccursInAny1` as) (i `NotPositiveIn` b)
+i `NotPositiveIn` TArrow a b = These (i `OccursIn` a) (i `NotPositiveIn` b)
 i `NotPositiveIn` TUnion as = i `NotPositiveInAny1` as
 i `NotPositiveIn` TProd as = i `NotPositiveInAny` as
 i `NotPositiveIn` TSum as = i `NotPositiveInAny` as
@@ -126,7 +240,7 @@ notPositiveAny1ToOccursAny1 : (as : List1 (Ty k)) -> i `NotPositiveInAny1` as ->
 
 notPositiveToOccurs (TVar j) = absurd
 notPositiveToOccurs TNat = id
-notPositiveToOccurs (TArrow as b) = mapSnd (notPositiveToOccurs b)
+notPositiveToOccurs (TArrow a b) = mapSnd (notPositiveToOccurs b)
 notPositiveToOccurs (TUnion as) = notPositiveAny1ToOccursAny1 as
 notPositiveToOccurs (TProd as) = notPositiveAnyToOccursAny as
 notPositiveToOccurs (TSum as) = notPositiveAnyToOccursAny as
@@ -145,7 +259,7 @@ notEnvPositiveInAny1 : (i : Fin n) -> (as : List1 (Ty n)) -> Bool
 
 i `notEnvPositiveIn` (TVar j) = False
 i `notEnvPositiveIn` TNat = False
-i `notEnvPositiveIn` (TArrow as b) = (i `occursInAny1` as) || (i `notEnvPositiveIn` b)
+i `notEnvPositiveIn` (TArrow a b) = (i `occursIn` a) || (i `notEnvPositiveIn` b)
 i `notEnvPositiveIn` (TUnion as) = i `notEnvPositiveInAny1` as
 i `notEnvPositiveIn` (TProd as) = i `notEnvPositiveInAny` as
 i `notEnvPositiveIn` (TSum as) = i `notEnvPositiveInAny` as
@@ -168,8 +282,8 @@ reflectNotPositiveInAny1 :
 
 reflectNotPositiveIn i (TVar j) = RFalse id
 reflectNotPositiveIn i TNat = RFalse id
-reflectNotPositiveIn i (TArrow as b) =
-  reflectThese (reflectOccursInAny1 i as) (reflectNotPositiveIn i b)
+reflectNotPositiveIn i (TArrow a b) =
+  reflectThese (reflectOccursIn i a) (reflectNotPositiveIn i b)
 reflectNotPositiveIn i (TUnion as) = reflectNotPositiveInAny1 i as
 reflectNotPositiveIn i (TProd as) = reflectNotPositiveInAny i as
 reflectNotPositiveIn i (TSum as) = reflectNotPositiveInAny i as
@@ -193,7 +307,7 @@ Any1IllFormed : List1 (Ty n) -> Type
 
 IllFormed (TVar v) = Void
 IllFormed TNat = Void
-IllFormed (TArrow as b) = These (Any1IllFormed as) (IllFormed b)
+IllFormed (TArrow a b) = These (IllFormed a) (IllFormed b)
 IllFormed (TUnion as) = Any1IllFormed as
 IllFormed (TProd as) = AnyIllFormed as
 IllFormed (TSum as) = AnyIllFormed as
@@ -214,7 +328,7 @@ any1IllFormed : (as : List1 (Ty n)) -> Bool
 
 illFormed (TVar j) = False
 illFormed TNat = False
-illFormed (TArrow as b) = any1IllFormed as || illFormed b
+illFormed (TArrow a b) = illFormed a || illFormed b
 illFormed (TUnion as) = any1IllFormed as
 illFormed (TProd as) = anyIllFormed as
 illFormed (TSum as) = anyIllFormed as
@@ -232,8 +346,8 @@ reflectAny1IllFormed : (as : List1 (Ty n)) -> Any1IllFormed as `Reflects` any1Il
 
 reflectIllFormed (TVar j) = RFalse id
 reflectIllFormed TNat = RFalse id
-reflectIllFormed (TArrow as b) =
-  reflectThese (reflectAny1IllFormed as) (reflectIllFormed b)
+reflectIllFormed (TArrow a b) =
+  reflectThese (reflectIllFormed a) (reflectIllFormed b)
 reflectIllFormed (TUnion as) = reflectAny1IllFormed as
 reflectIllFormed (TProd as) = reflectAnyIllFormed as
 reflectIllFormed (TSum as) = reflectAnyIllFormed as
@@ -256,7 +370,7 @@ thinAll1 : k `Thins` n -> List1 (Ty k) -> List1 (Ty n)
 
 thin f (TVar i) = TVar (index f i)
 thin f TNat = TNat
-thin f (TArrow as b) = TArrow (thinAll1 f as) (thin f b)
+thin f (TArrow a b) = TArrow (thin f a) (thin f b)
 thin f (TUnion as) = TUnion (thinAll1 f as)
 thin f (TProd as) = TProd (thinAll f as)
 thin f (TSum as) = TSum (thinAll f as)
@@ -275,7 +389,7 @@ thinCongAll1 : f ~~~ g -> (as : List1 (Ty k)) -> thinAll1 f as = thinAll1 g as
 
 thinCong prf (TVar i) = cong TVar (prf.index i)
 thinCong prf TNat = Refl
-thinCong prf (TArrow as b) = cong2 TArrow (thinCongAll1 prf as) (thinCong prf b)
+thinCong prf (TArrow a b) = cong2 TArrow (thinCong prf a) (thinCong prf b)
 thinCong prf (TUnion as) = cong TUnion (thinCongAll1 prf as)
 thinCong prf (TProd as) = cong TProd (thinCongAll prf as)
 thinCong prf (TSum as) = cong TSum (thinCongAll prf as)
@@ -292,7 +406,7 @@ thinIdAll1 : (as : List1 (Ty n)) -> thinAll1 Id as = as
 
 thinId (TVar i) = cong TVar (indexId i)
 thinId TNat = Refl
-thinId (TArrow as b) = cong2 TArrow (thinIdAll1 as) (thinId b)
+thinId (TArrow a b) = cong2 TArrow (thinId a) (thinId b)
 thinId (TUnion as) = cong TUnion (thinIdAll1 as)
 thinId (TProd as) = cong TProd (thinIdAll as)
 thinId (TSum as) = cong TSum (thinIdAll as)
@@ -329,7 +443,7 @@ thinOccursInAny1 :
 
 thinOccursIn f i (TVar x) = \Refl => Refl
 thinOccursIn f i TNat = id
-thinOccursIn f i (TArrow as b) = bimap (thinOccursInAny1 f i as) (thinOccursIn f i b)
+thinOccursIn f i (TArrow a b) = bimap (thinOccursIn f i a) (thinOccursIn f i b)
 thinOccursIn f i (TUnion as) = thinOccursInAny1 f i as
 thinOccursIn f i (TProd as) = thinOccursInAny f i as
 thinOccursIn f i (TSum as) = thinOccursInAny f i as
@@ -362,16 +476,16 @@ thinOccursInAny1Inv' :
 
 thinOccursInInv' f i (TVar j) = \eq => (j ** (sym eq , Refl))
 thinOccursInInv' f i TNat = absurd
-thinOccursInInv' f i (TArrow as b) =
+thinOccursInInv' f i (TArrow a b) =
   these
     (\occurs =>
-      let (j ** (eq, prf)) = thinOccursInAny1Inv' f i as occurs in
+      let (j ** (eq, prf)) = thinOccursInInv' f i a occurs in
       (j ** (eq, This prf)))
     (\occurs =>
       let (j ** (eq, prf)) = thinOccursInInv' f i b occurs in
       (j ** (eq, That prf)))
     (\occurs1, occurs2 =>
-      let (j1 ** (eq1, prf1)) = thinOccursInAny1Inv' f i as occurs1 in
+      let (j1 ** (eq1, prf1)) = thinOccursInInv' f i a occurs1 in
       let (j2 ** (eq2, prf2)) = thinOccursInInv' f i b occurs2 in
       (j1 ** (eq1,
         Both prf1 $
@@ -452,9 +566,9 @@ thinNotPositiveAny1Inv :
 
 thinNotPositiveInv f i (TVar j) = id
 thinNotPositiveInv f i TNat = id
-thinNotPositiveInv f i (TArrow as b) =
+thinNotPositiveInv f i (TArrow a b) =
   bimap
-    (thinOccursInAny1Inv f i as)
+    (thinOccursInInv f i a)
     (thinNotPositiveInv f i b)
 thinNotPositiveInv f i (TUnion as) = thinNotPositiveAny1Inv f i as
 thinNotPositiveInv f i (TProd as) = thinNotPositiveAnyInv f i as
@@ -486,7 +600,7 @@ thinAny1IllFormedInv :
 
 thinIllFormedInv f (TVar i) = id
 thinIllFormedInv f TNat = id
-thinIllFormedInv f (TArrow as b) = bimap (thinAny1IllFormedInv f as) (thinIllFormedInv f b)
+thinIllFormedInv f (TArrow a b) = bimap (thinIllFormedInv f a) (thinIllFormedInv f b)
 thinIllFormedInv f (TUnion as) = thinAny1IllFormedInv f as
 thinIllFormedInv f (TProd as) = thinAnyIllFormedInv f as
 thinIllFormedInv f (TSum as) = thinAnyIllFormedInv f as
@@ -515,7 +629,7 @@ subAll1 : Env k n (Ty n) -> List1 (Ty k) -> List1 (Ty n)
 
 sub env (TVar i) = fromVar $ lookup env i
 sub env TNat = TNat
-sub env (TArrow as b) = TArrow (subAll1 env as) (sub env b)
+sub env (TArrow a b) = TArrow (sub env a) (sub env b)
 sub env (TUnion as) = TUnion (subAll1 env as)
 sub env (TProd as) = TProd (subAll env as)
 sub env (TSum as) = TSum (subAll env as)
@@ -554,9 +668,9 @@ subOccursInAny1 :
 
 subOccursIn env i (TVar x) occurs = \Refl => occurs
 subOccursIn env i TNat occurs = id
-subOccursIn env i (TArrow as b) occurs =
+subOccursIn env i (TArrow a b) occurs =
   bimap
-    (subOccursInAny1 env i as occurs)
+    (subOccursIn env i a occurs)
     (subOccursIn env i b occurs)
 subOccursIn env i (TUnion as) occurs = subOccursInAny1 env i as occurs
 subOccursIn env i (TProd as) occurs = subOccursInAny env i as occurs
@@ -641,9 +755,9 @@ subOccursInAny1Inv :
 
 subOccursInInv env prf (TVar x) = \p => irrelevantEq $ prf x p
 subOccursInInv env prf TNat = id
-subOccursInInv env prf (TArrow as b) =
+subOccursInInv env prf (TArrow a b) =
   bimap
-    (subOccursInAny1Inv env prf as)
+    (subOccursInInv env prf a)
     (subOccursInInv env prf b)
 subOccursInInv env prf (TUnion as) = subOccursInAny1Inv env prf as
 subOccursInInv env prf (TProd as) = subOccursInAnyInv env prf as
@@ -686,9 +800,9 @@ subNotPositiveInAny1 :
 
 subNotPositiveIn env i (TVar x) occurs = absurd
 subNotPositiveIn env i TNat occurs = id
-subNotPositiveIn env i (TArrow as b) occurs =
+subNotPositiveIn env i (TArrow a b) occurs =
   bimap
-    (subOccursInAny1 env i as occurs)
+    (subOccursIn env i a occurs)
     (subNotPositiveIn env i b occurs)
 subNotPositiveIn env i (TUnion as) occurs = subNotPositiveInAny1 env i as occurs
 subNotPositiveIn env i (TProd as) occurs = subNotPositiveInAny env i as occurs
@@ -760,9 +874,9 @@ subNotPositiveInAny1Inv :
 
 subNotPositiveInInv env prf1 prf2 (TVar x) = \npos => void $ prf1 x npos
 subNotPositiveInInv env prf1 prf2 TNat = id
-subNotPositiveInInv env prf1 prf2 (TArrow as b) =
+subNotPositiveInInv env prf1 prf2 (TArrow a b) =
   bimap
-    (subOccursInAny1Inv env prf2 as)
+    (subOccursInInv env prf2 a)
     (subNotPositiveInInv env prf1 prf2 b)
 subNotPositiveInInv env prf1 prf2 (TUnion as) = subNotPositiveInAny1Inv env prf1 prf2 as
 subNotPositiveInInv env prf1 prf2 (TProd as) = subNotPositiveInAnyInv env prf1 prf2 as
@@ -798,7 +912,7 @@ subAny1IllFormed :
 
 subIllFormed env (TVar i) = absurd
 subIllFormed env TNat = id
-subIllFormed env (TArrow as b) = bimap (subAny1IllFormed env as) (subIllFormed env b)
+subIllFormed env (TArrow a b) = bimap (subIllFormed env a) (subIllFormed env b)
 subIllFormed env (TUnion as) = subAny1IllFormed env as
 subIllFormed env (TProd as) = subAnyIllFormed env as
 subIllFormed env (TSum as) = subAnyIllFormed env as
@@ -855,9 +969,9 @@ subAny1IllFormedInv :
 
 subIllFormedInv env prf (TVar i) = \ill => void $ prf i ill
 subIllFormedInv env prf TNat = id
-subIllFormedInv env prf (TArrow as b) =
+subIllFormedInv env prf (TArrow a b) =
   bimap
-    (subAny1IllFormedInv env prf as)
+    (subIllFormedInv env prf a)
     (subIllFormedInv env prf b)
 subIllFormedInv env prf (TUnion as) = subAny1IllFormedInv env prf as
 subIllFormedInv env prf (TProd as) = subAnyIllFormedInv env prf as

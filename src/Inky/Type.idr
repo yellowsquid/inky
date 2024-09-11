@@ -38,6 +38,14 @@ export
 Injective TVar where
   injective Refl = Refl
 
+export
+Injective TUnion where
+  injective Refl = Refl
+
+export
+Injective TProd where
+  injective Refl = Refl
+
 -- Equality --------------------------------------------------------------------
 
 export

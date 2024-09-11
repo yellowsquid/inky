@@ -7,6 +7,8 @@ options = "--total"
 depends = contrib
 
 modules
-  = Data.These.Decidable
+  = Data.Maybe.Decidable
+  , Data.These.Decidable
+  , Inky.Term
   , Inky.Thinning
   , Inky.Type

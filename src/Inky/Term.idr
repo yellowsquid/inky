@@ -41,11 +41,6 @@ data CheckTerm where
     SynthTerm ty tm ->
     CheckTerm ty (S tm) ->
     CheckTerm ty tm
-  FoldN :
-    CheckTerm ty tm ->
-    CheckTerm ty tm ->
-    CheckTerm ty (S tm) ->
-    CheckTerm ty tm
   Abs : (k : Nat) -> CheckTerm ty (S k + tm) -> CheckTerm ty tm
   Inj : Nat -> CheckTerm ty tm -> CheckTerm ty tm
   Tup : List (CheckTerm ty tm) -> CheckTerm ty tm
@@ -83,6 +78,7 @@ CanInject (TSum as) bs = as = bs
 CanInject _ bs = Void
 
 IsFixpoint : Ty ty -> Ty (S ty) -> Type
+IsFixpoint TNat b = b = TSum [TProd [], TVar FZ]
 IsFixpoint (TFix a) b = a = b
 IsFixpoint _ b = Void
 
@@ -149,11 +145,6 @@ Checks ctx a (Let e t) =
   ( Synths ctx e b
   , Checks (b :: ctx) a t
   ))
-Checks ctx a (FoldN t u v) =
-  ( Checks ctx TNat t
-  , Checks ctx a u
-  , Checks (a :: ctx) a v
-  )
 Checks ctx a (Abs k t) =
   ( as : Vect (S k) _ ** b **
   ( IsArrow (S k) a as b
@@ -238,6 +229,7 @@ canInjectUnique (TUnion as) Refl Refl = Refl
 canInjectUnique (TSum as)   Refl Refl = Refl
 
 isFixpointUnique : (a : Ty ty) -> IsFixpoint a b -> IsFixpoint a c -> b = c
+isFixpointUnique TNat Refl Refl = Refl
 isFixpointUnique (TFix a) Refl Refl = Refl
 
 isArrowUnique :
@@ -310,6 +302,7 @@ canInject (TSum as) = Just as
 canInject _ = Nothing
 
 isFixpoint : Ty ty -> Maybe (Ty (S ty))
+isFixpoint TNat = Just (TSum [TProd [], TVar FZ])
 isFixpoint (TFix a) = Just a
 isFixpoint _ = Nothing
 
@@ -372,10 +365,6 @@ checks ctx a (Let e t) =
   case synths ctx e of
     Just b => checks (b :: ctx) a t
     Nothing => False
-checks ctx a (FoldN t u v) =
-  checks ctx TNat t &&
-  checks ctx a u &&
-  checks (a :: ctx) a v
 checks ctx a (Abs k t) =
   case isArrow (S k) a of
     Just (as, b) => checks (as ++ ctx) b t
@@ -464,7 +453,7 @@ reflectCanInject (TFix a) = RNothing (\x, y => y)
 
 reflectIsFixpoint : (a : Ty ty) -> IsFixpoint a `OnlyWhen` isFixpoint a
 reflectIsFixpoint (TVar i) = RNothing (\x, y => y)
-reflectIsFixpoint TNat = RNothing (\x, y => y)
+reflectIsFixpoint TNat = RJust Refl
 reflectIsFixpoint (TArrow a b) = RNothing (\x, y => y)
 reflectIsFixpoint (TUnion as) = RNothing (\x, y => y)
 reflectIsFixpoint (TProd as) = RNothing (\x, y => y)
@@ -579,13 +568,6 @@ reflectChecks ctx a (Let e t) with (reflectSynths ctx e) | (synths ctx e)
         let tTy = rewrite synthsUnique ctx e {a = b, b = b'} eTy eTy' in tTy in
         tBad tTy)
   _ | RNothing eBad | Nothing = RFalse (\(b ** (eTy, _)) => eBad b eTy)
-reflectChecks ctx a (FoldN t u v) with (reflectChecks ctx TNat t) | (checks ctx TNat t)
-  _ | RTrue tTy | _ with (reflectChecks ctx a u) | (checks ctx a u)
-    _ | RTrue uTy | _ with (reflectChecks (a :: ctx) a v) | (checks (a :: ctx) a v)
-      _ | RTrue vTy | _ = RTrue (tTy, uTy, vTy)
-      _ | RFalse vBad | _ = RFalse (\(_, _, vTy) => vBad vTy)
-    _ | RFalse uBad | _ = RFalse (\(_, uTy, _) => uBad uTy)
-  _ | RFalse tBad | _ = RFalse (\(tTy, _) => tBad tTy)
 reflectChecks ctx a (Abs k t) with (reflectIsArrow (S k) a) | (isArrow (S k) a)
   _ | RJust prf | Just (as, b) with (reflectChecks (as ++ ctx) b t) | (checks (as ++ ctx) b t)
     _ | RTrue tTy | _ = RTrue (as ** b ** (prf, tTy))

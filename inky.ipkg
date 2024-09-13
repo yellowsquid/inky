@@ -10,5 +10,7 @@ modules
   = Data.Maybe.Decidable
   , Data.These.Decidable
   , Inky.Term
+  , Inky.Term.Pretty
   , Inky.Thinning
   , Inky.Type
+  , Inky.Type.Pretty

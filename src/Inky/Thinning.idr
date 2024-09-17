@@ -1,7 +1,9 @@
 module Inky.Thinning
 
-import public Data.Fin
+import public Inky.Context
 
+import Data.DPair
+import Data.Nat
 import Control.Function
 
 --------------------------------------------------------------------------------
@@ -9,24 +11,27 @@ import Control.Function
 --------------------------------------------------------------------------------
 
 public export
-data Thins : Nat -> Nat -> Type where
-  Id : n `Thins` n
-  Drop : k `Thins` n -> k `Thins` S n
-  Keep : k `Thins` n -> S k `Thins` S n
+data Thins : Context a -> Context a -> Type where
+  Id : ctx `Thins` ctx
+  Drop : ctx1 `Thins` ctx2 -> ctx1 `Thins` ctx2 :< x
+  Keep : ctx1 `Thins` ctx2 -> ctx1 :< (x :- v) `Thins` ctx2 :< (y :- v)
 
 %name Thins f, g, h
 
 -- Basics
 
-export
-index : k `Thins` n -> Fin k -> Fin n
-index Id x = x
-index (Drop f) x = FS (index f x)
-index (Keep f) FZ = FZ
-index (Keep f) (FS x) = FS (index f x)
+indexPos : (f : ctx1 `Thins` ctx2) -> (pos : VarPos ctx1 x v) -> Var ctx2 v
+indexPos Id pos = toVar pos
+indexPos (Drop f) pos = ThereVar (indexPos f pos)
+indexPos (Keep f) Here = toVar Here
+indexPos (Keep f) (There pos) = ThereVar (indexPos f pos)
 
 export
-(.) : k `Thins` n -> j `Thins` k -> j `Thins` n
+index : ctx1 `Thins` ctx2 -> Var ctx1 v -> Var ctx2 v
+index f i = indexPos f i.pos
+
+export
+(.) : ctx2 `Thins` ctx3 -> ctx1 `Thins` ctx2 -> ctx1 `Thins` ctx3
 Id . g = g
 Drop f . g = Drop (f . g)
 Keep f . Id = Keep f
@@ -35,43 +40,53 @@ Keep f . Keep g = Keep (f . g)
 
 -- Basic properties
 
-export
-indexInjective : (f : k `Thins` n) -> {x, y : Fin k} -> index f x = index f y -> x = y
-indexInjective Id eq = eq
-indexInjective (Drop f) eq = indexInjective f $ injective eq
-indexInjective (Keep f) {x = FZ} {y = FZ} eq = Refl
-indexInjective (Keep f) {x = FS x} {y = FS y} eq = cong FS $ indexInjective f $ injective eq
+indexPosInjective :
+  (f : ctx1 `Thins` ctx2) -> {i : VarPos ctx1 x v} -> {j : VarPos ctx1 y v} ->
+  (0 _ : toNat (indexPos f i).pos = toNat (indexPos f j).pos) -> i = j
+indexPosInjective Id prf = toNatInjective prf
+indexPosInjective (Drop f) prf = indexPosInjective f (injective prf)
+indexPosInjective (Keep f) {i = Here} {j = Here} prf = Refl
+indexPosInjective (Keep f) {i = There i} {j = There j} prf =
+  thereCong (indexPosInjective f $ injective prf)
 
 export
-(f : k `Thins` n) => Injective (index f) where
-  injective = indexInjective f
+indexInjective : (f : ctx1 `Thins` ctx2) -> {i, j : Var ctx1 v} -> index f i = index f j -> i = j
+indexInjective f {i = %% x, j = %% y} prf = toVarCong (indexPosInjective f $ toNatCong' prf)
 
 export
-indexId : (0 x : Fin n) -> index Id x = x
-indexId x = Refl
+indexId : (0 i : Var ctx v) -> index Id i = i
+indexId (%% x) = Refl
 
 export
-indexDrop : (0 f : k `Thins` n) -> (0 x : Fin k) -> index (Drop f) x = FS (index f x)
-indexDrop f x = Refl
+indexDrop : (0 f : ctx1 `Thins` ctx2) -> (0 i : Var ctx1 v) -> index (Drop f) i = ThereVar (index f i)
+indexDrop f (%% x) = Refl
 
 export
-indexKeepFZ : (0 f : k `Thins` n) -> index (Keep f) FZ = FZ
-indexKeepFZ f = Refl
+indexKeepHere : (0 f : ctx1 `Thins` ctx2) -> index (Keep {x, y} f) (%% x) = (%% y)
+indexKeepHere f = Refl
 
 export
-indexKeepFS : (0 f : k `Thins` n) -> (0 x : Fin k) -> index (Keep f) (FS x) = FS (index f x)
-indexKeepFS f x = Refl
+indexKeepThere :
+  (0 f : ctx1 `Thins` ctx2) -> (0 i : Var ctx1 v) ->
+  index (Keep f) (ThereVar i) = ThereVar (index f i)
+indexKeepThere f (%% x) = Refl
+
+indexPosComp :
+  (f : ctx2 `Thins` ctx3) -> (g : ctx1 `Thins` ctx2) -> (pos : VarPos ctx1 x v) ->
+  indexPos (f . g) pos = index f (indexPos g pos)
+indexPosComp Id g pos with (indexPos g pos)
+  _ | (%% _) = Refl
+indexPosComp (Drop f) g pos = cong ThereVar (indexPosComp f g pos)
+indexPosComp (Keep f) Id pos = Refl
+indexPosComp (Keep f) (Drop g) pos = cong ThereVar (indexPosComp f g pos)
+indexPosComp (Keep f) (Keep g) Here = Refl
+indexPosComp (Keep f) (Keep g) (There pos) = cong ThereVar (indexPosComp f g pos)
 
 export
 indexComp :
-  (f : k `Thins` n) -> (g : j `Thins` k) -> (x : Fin j) ->
-  index (f . g) x = index f (index g x)
-indexComp Id g x = Refl
-indexComp (Drop f) g x = cong FS (indexComp f g x)
-indexComp (Keep f) Id x = Refl
-indexComp (Keep f) (Drop g) x = cong FS (indexComp f g x)
-indexComp (Keep f) (Keep g) FZ = Refl
-indexComp (Keep f) (Keep g) (FS x) = cong FS (indexComp f g x)
+  (f : ctx2 `Thins` ctx3) -> (g : ctx1 `Thins` ctx2) -> (i : Var ctx1 v) ->
+  index (f . g) i = index f (index g i)
+indexComp f g i = indexPosComp f g i.pos
 
 -- Congruence ------------------------------------------------------------------
 
@@ -79,7 +94,7 @@ export
 infix 6 ~~~
 
 public export
-data (~~~) : k `Thins` n -> k `Thins` n -> Type where
+data (~~~) : ctx1 `Thins` ctx2 -> ctx1 `Thins` ctx2 -> Type where
   IdId : Id ~~~ Id
   IdKeep : Id ~~~ f -> Id ~~~ Keep f
   KeepId : f ~~~ Id -> Keep f ~~~ Id
@@ -88,86 +103,95 @@ data (~~~) : k `Thins` n -> k `Thins` n -> Type where
 
 %name Thinning.(~~~) prf
 
-export
-(.index) : f ~~~ g -> (x : Fin k) -> index f x = index g x
-(IdId).index x = Refl
-(IdKeep prf).index FZ = Refl
-(IdKeep prf).index (FS x) = cong FS (prf.index x)
-(KeepId prf).index FZ = Refl
-(KeepId prf).index (FS x) = cong FS (prf.index x)
-(DropDrop prf).index x = cong FS (prf.index x)
-(KeepKeep prf).index FZ = Refl
-(KeepKeep prf).index (FS x) = cong FS (prf.index x)
+(.indexPos) : f ~~~ g -> (pos : VarPos ctx1 x v) -> indexPos f pos = indexPos g pos
+(IdId).indexPos pos = Refl
+(IdKeep prf).indexPos Here = Refl
+(IdKeep prf).indexPos (There pos) = cong ThereVar $ prf.indexPos pos
+(KeepId prf).indexPos Here = Refl
+(KeepId prf).indexPos (There pos) = cong ThereVar $ prf.indexPos pos
+(DropDrop prf).indexPos pos = cong ThereVar $ prf.indexPos pos
+(KeepKeep prf).indexPos Here = Refl
+(KeepKeep prf).indexPos (There pos) = cong ThereVar $ prf.indexPos pos
 
 export
-pointwise : {f, g : k `Thins` n} -> (0 _ : (x : Fin k) -> index f x = index g x) -> f ~~~ g
-pointwise {f = Id} {g = Id} prf = IdId
-pointwise {f = Id} {g = Drop g} prf = void $ absurd $ prf FZ
-pointwise {f = Id} {g = Keep g} prf = IdKeep (pointwise $ \x => injective $ prf $ FS x)
-pointwise {f = Drop f} {g = Id} prf = void $ absurd $ prf FZ
-pointwise {f = Drop f} {g = Drop g} prf = DropDrop (pointwise $ \x => injective $ prf x)
-pointwise {f = Drop f} {g = Keep g} prf = void $ absurd $ prf FZ
-pointwise {f = Keep f} {g = Id} prf = KeepId (pointwise $ \x => injective $ prf $ FS x)
-pointwise {f = Keep f} {g = Drop g} prf = void $ absurd $ prf FZ
-pointwise {f = Keep f} {g = Keep g} prf = KeepKeep (pointwise $ \x => injective $ prf $ FS x)
+(.index) : f ~~~ g -> (i : Var ctx1 v) -> index f i = index g i
+prf.index i = prf.indexPos i.pos
 
 --------------------------------------------------------------------------------
 -- Environments ----------------------------------------------------------------
 --------------------------------------------------------------------------------
 
 public export
-data Env : Nat -> Nat -> Type -> Type where
-  Base : k `Thins` n -> Env k n a
-  (:<) : Env k n a -> a -> Env (S k) n a
+data Env : Context a -> Context a -> (a -> Type) -> Type where
+  Base : {0 ctx1, ctx2 : Context a} -> ctx1 `Thins` ctx2 -> Env ctx1 ctx2 p
+  (:<) :
+    {0 ctx1, ctx2 : Context a} ->
+    Env ctx1 ctx2 p -> (x : Assoc0 (p v)) ->
+    Env (ctx1 :< (x.name :- v)) ctx2 p
 
 %name Env env
 
+lookupPos : Env ctx1 ctx2 p -> VarPos ctx1 x v -> Either (Var ctx2 v) (p v)
+lookupPos (Base f) pos = Left (indexPos f pos)
+lookupPos (env :< (x :- pv)) Here = Right pv
+lookupPos (env :< (x :- pv)) (There pos) = lookupPos env pos
+
 export
-lookup : Env k n a -> Fin k -> Either (Fin n) a
-lookup (Base f) x = Left (index f x)
-lookup (env :< v) FZ = Right v
-lookup (env :< v) (FS x) = lookup env x
+lookup : Env ctx1 ctx2 p -> Var ctx1 v -> Either (Var ctx2 v) (p v)
+lookup env i = lookupPos env i.pos
 
 -- Properties
 
 export
-lookupFZ : (0 env : Env k n a) -> (0 v : a) -> lookup (env :< v) FZ = Right v
-lookupFZ env v = Refl
+lookupHere :
+  (0 env : Env ctx1 ctx2 p) -> (0 x : String) -> (0 pv : p v) ->
+  lookup (env :< (x :- pv)) (%% x) = Right pv
+lookupHere env x pv = Refl
 
 export
 lookupFS :
-  (0 env : Env k n a) -> (0 v : a) -> (0 x : Fin k) ->
-  lookup (env :< v) (FS x) = lookup env x
-lookupFS env v x = Refl
+  (0 env : Env ctx1 ctx2 p) -> (0 x : String) -> (0 pv : p v) -> (0 i : Var ctx1 w) ->
+  lookup (env :< (x :- pv)) (ThereVar i) = lookup env i
+lookupFS env x pv i = Refl
 
 --------------------------------------------------------------------------------
 -- Renaming Coalgebras ---------------------------------------------------------
 --------------------------------------------------------------------------------
 
 public export
-interface Rename (0 a : Nat -> Type) where
-  var : Fin n -> a n
-  rename : k `Thins` n -> a k -> a n
-  0 renameCong : {0 f, g : k `Thins` n} -> f ~~~ g -> (x : a k) -> rename f x = rename g x
-  0 renameId : (x : a n) -> rename Id x = x
+interface Rename (0 a : Type) (0 t : Context a -> a -> Type) where
+  var : {0 ctx : Context a} -> {0 v : a} -> Var ctx v -> t ctx v
+  rename :
+    {0 ctx1, ctx2 : Context a} -> ctx1 `Thins` ctx2 ->
+    {0 v : a} -> t ctx1 v -> t ctx2 v
+  0 renameCong :
+    {0 ctx1, ctx2 : Context a} -> {0 f, g : ctx1 `Thins` ctx2} -> f ~~~ g ->
+    {0 v : a} -> (x : t ctx1 v) -> rename f x = rename g x
+  0 renameId : {0 ctx : Context a} -> {0 v : a} -> (x : t ctx v) -> rename Id x = x
 
 export
-lift : Rename a => k `Thins` n -> Env j k (a k) -> Env j n (a n)
+lift : Rename a t => ctx2 `Thins` ctx3 -> Env ctx1 ctx2 (t ctx2) -> Env ctx1 ctx3 (t ctx3)
 lift Id env = env
 lift f (Base g) = Base (f . g)
-lift f (env :< v) = lift f env :< rename f v
+lift f (env :< (x :- v)) = lift f env :< (x :- rename f v)
+
+lookupPosLift :
+  Rename a t =>
+  (f : ctx2 `Thins` ctx3) -> (env : Env ctx1 ctx2 (t ctx2)) -> (pos : VarPos ctx1 x v) ->
+  lookupPos (lift f env) pos = bimap (index f) (rename f) (lookupPos env pos)
+lookupPosLift Id env pos with (lookupPos env pos)
+  _ | Left (%% y) = Refl
+  _ | Right y = cong Right $ irrelevantEq $ sym $ renameId y
+lookupPosLift (Drop f) (Base g) pos = cong Left $ indexPosComp (Drop f) g pos
+lookupPosLift (Keep f) (Base g) pos = cong Left $ indexPosComp (Keep f) g pos
+lookupPosLift (Drop f) (env :< (x :- v)) Here = Refl
+lookupPosLift (Keep f) (env :< (x :- v)) Here = Refl
+lookupPosLift (Drop f) (env :< (x :- v)) (There pos) = lookupPosLift (Drop f) env pos
+lookupPosLift (Keep f) (env :< (x :- v)) (There pos) = lookupPosLift (Keep f) env pos
 
 export
 lookupLift :
-  Rename a =>
-  (f : k `Thins` n) -> (env : Env j k (a k)) -> (x : Fin j) ->
-  lookup (lift f env) x = bimap (index f) (rename f) (lookup env x)
-lookupLift Id env x with (lookup env x)
-  _ | Left y = Refl
-  _ | Right y = cong Right $ irrelevantEq $ sym $ renameId y
-lookupLift (Drop f) (Base g) x = cong Left $ indexComp (Drop f) g x
-lookupLift (Drop f) (env :< y) FZ = Refl
-lookupLift (Drop f) (env :< y) (FS x) = lookupLift (Drop f) env x
-lookupLift (Keep f) (Base g) x = cong Left $ indexComp (Keep f) g x
-lookupLift (Keep f) (env :< y) FZ = Refl
-lookupLift (Keep f) (env :< y) (FS x) = lookupLift (Keep f) env x
+  Rename a t =>
+  (f : ctx2 `Thins` ctx3) -> (env : Env ctx1 ctx2 (t ctx2)) -> (i : Var ctx1 v) ->
+  lookup (lift f env) i = bimap (index f) (rename f) (lookup env i)
+lookupLift f env i = lookupPosLift f env i.pos

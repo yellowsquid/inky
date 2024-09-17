@@ -9,6 +9,7 @@ depends = contrib
 modules
   = Data.Maybe.Decidable
   , Data.These.Decidable
+  , Inky.Context
   , Inky.Parser
   , Inky.Term
   , Inky.Term.Pretty

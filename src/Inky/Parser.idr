@@ -7,116 +7,9 @@ import Data.List.Elem
 import Data.List1
 import Data.Nat
 import Data.So
+import Inky.Context
+import Text.Lexer
 
--- Contexts --------------------------------------------------------------------
-
-export
-infix 2 :-
-
-export
-prefix 2 %%
-
-public export
-record Assoc (a : Type) where
-  constructor (:-)
-  0 name : String
-  value : a
-
-public export
-data Context : Type -> Type where
-  Lin : Context a
-  (:<) : Context a -> Assoc a -> Context a
-
-%name Context ctx
-
-public export
-data Length : Context a -> Type where
-  Z : Length [<]
-  S : Length ctx -> Length (ctx :< x)
-
-%name Length len
-
-public export
-(++) : Context a -> Context a -> Context a
-ctx ++ [<] = ctx
-ctx ++ ctx' :< x = (ctx ++ ctx') :< x
-
-lengthAppend : Length ctx1 -> Length ctx2 -> Length (ctx1 ++ ctx2)
-lengthAppend len1 Z = len1
-lengthAppend len1 (S len2) = S (lengthAppend len1 len2)
-
--- Variableents
-
-public export
-data VariablePos : Context a -> (0 x : String) -> a -> Type where
-  [search x]
-  Here : VariablePos (ctx :< (x :- v)) x v
-  There : VariablePos ctx x v -> VariablePos (ctx :< y) x v
-
-public export
-record Variable (ctx : Context a) (v : a) where
-  constructor (%%)
-  0 name : String
-  {auto pos : VariablePos ctx name v}
-
-toVar : VariablePos ctx x v -> Variable ctx v
-toVar pos = (%%) x {pos}
-
-wknLPos : VariablePos ctx1 x v -> Length ctx2 -> VariablePos (ctx1 ++ ctx2) x v
-wknLPos x Z = x
-wknLPos x (S len) = There (wknLPos x len)
-
-wknRPos : VariablePos ctx2 x v -> VariablePos (ctx1 ++ ctx2) x v
-wknRPos Here = Here
-wknRPos (There x) = There (wknRPos x)
-
-splitPos : Length ctx2 -> VariablePos (ctx1 ++ ctx2) x v -> Either (VariablePos ctx1 x v) (VariablePos ctx2 x v)
-splitPos Z x = Left x
-splitPos (S len) Here = Right Here
-splitPos (S len) (There x) = mapSnd There $ splitPos len x
-
-wknL : {auto len : Length ctx2} -> Variable ctx1 v -> Variable (ctx1 ++ ctx2) v
-wknL x = (%%) x.name {pos = wknLPos x.pos len}
-
-wknR : Variable ctx2 v -> Variable (ctx1 ++ ctx2) v
-wknR x = (%%) x.name {pos = wknRPos x.pos}
-
-split : {auto len : Length ctx2} -> Variable (ctx1 ++ ctx2) x -> Either (Variable ctx1 x) (Variable ctx2 x)
-split x = bimap toVar toVar $ splitPos len x.pos
-
-lift :
-  {auto len : Length ctx} ->
-  (forall x. Variable ctx1 x -> Variable ctx2 x) ->
-  Variable (ctx1 ++ ctx) x -> Variable (ctx2 ++ ctx) x
-lift f = either (wknL {len} . f) wknR . split {len}
-
--- Environments
-
-namespace Quantifier
-  public export
-  data All : (0 p : a -> Type) -> Context a -> Type where
-    Lin : All p [<]
-    (:<) : All p ctx -> (px : p x.value) -> All p (ctx :< x)
-
-  %name Quantifier.All env
-
-  indexAllPos : VariablePos ctx x v -> All p ctx -> p v
-  indexAllPos Here (env :< px) = px
-  indexAllPos (There x) (env :< px) = indexAllPos x env
-
-  export
-  indexAll : Variable ctx v -> All p ctx -> p v
-  indexAll x env = indexAllPos x.pos env
-
-  export
-  mapProperty : ({0 x : a} -> p x -> q x) -> All p ctx -> All q ctx
-  mapProperty f [<] = [<]
-  mapProperty f (env :< px) = mapProperty f env :< f px
-
-  export
-  (++) : All p ctx1 -> All p ctx2 -> All p (ctx1 ++ ctx2)
-  env1 ++ [<] = env1
-  env1 ++ env2 :< px = (env1 ++ env2) :< px
 
 -- Parser Expressions ----------------------------------------------------------
 
@@ -131,10 +24,10 @@ linUnless True ctx = ctx
 
 public export
 data Parser : (i : Type) -> (nil : Bool) -> (locked, free : Context (Bool, Type)) -> Type -> Type where
-  Var : (f : a -> b) -> Variable free (nil, a) -> Parser i nil locked free b
+  Var : (f : a -> b) -> Var free (nil, a) -> Parser i nil locked free b
   Fail : (msg : String) -> Parser i False locked free a
   Empty : (x : a) -> Parser i True locked free a
-  Lit : (text : i) -> (x : a) -> Parser i False locked free a
+  Lit : (text : i) -> (x : String -> a) -> Parser i False locked free a
   (<**>) :
     {nil1, nil2 : Bool} ->
     Parser i nil1 locked free (a -> b) ->
@@ -158,7 +51,7 @@ Functor (Parser i nil locked free) where
   map f (Var g x) = Var (f . g) x
   map f (Fail msg) = Fail msg
   map f (Empty x) = Empty (f x)
-  map f (Lit text x) = Lit text (f x)
+  map f (Lit text g) = Lit text (f . g)
   map f ((<**>) {nil1 = True} p q) = map (f .) p <**> q
   map f ((<**>) {nil1 = False} p q) = map (f .) p <**> q
   map f (p <|> q) = map f p <|> map f q
@@ -209,7 +102,7 @@ follow penv1 penv2 fenv1 fenv2 (Fix x f p) =
   -- Proof:
   --   - we always add information
   --   - no step depends on existing information
-  follow (penv1 :< peek penv2 p) penv2 (fenv1 :< empty) fenv2 p
+  follow (penv1 :< (x :- peek penv2 p)) penv2 (fenv1 :< (x :- empty)) fenv2 p
 
 export
 WellTyped :
@@ -246,8 +139,8 @@ WellTyped penv1 penv2 fenv1 fenv2 (p <|> q) =
   )
 WellTyped penv1 penv2 fenv1 fenv2 (Fix x f p) =
   let fst = peek penv2 p in
-  let flw = follow (penv1 :< fst) penv2 (fenv1 :< empty) fenv2 p in
-  WellTyped (penv1 :< fst) penv2 (fenv1 :< flw) fenv2 p
+  let flw = follow (penv1 :< (x :- fst)) penv2 (fenv1 :< (x :- empty)) fenv2 p in
+  WellTyped (penv1 :< (x :- fst)) penv2 (fenv1 :< (x :- flw)) fenv2 p
 
 -- Parsing Function ------------------------------------------------------------
 
@@ -320,9 +213,9 @@ parser :
   (fenv1 : _) ->
   (fenv2 : _) ->
   {auto 0 wf : WellTyped penv1 penv2 fenv1 fenv2 p} ->
-  (xs : List i) ->
-  All (\x => (ys : List i) -> (0 _ : SmallerX False ys xs) -> uncurry (M ys) x) locked ->
-  All (\x => (ys : List i) -> (0 _ : SmallerX True ys xs) -> uncurry (M ys) x) free ->
+  (xs : List (WithBounds (Token i))) ->
+  All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX False ys xs) -> uncurry (M ys) x) locked ->
+  All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX True ys xs) -> uncurry (M ys) x) free ->
   M xs nil a
 parser (Var f x) penv1 penv2 fenv1 fenv2 xs env1 env2 =
   f <$> indexAll x env2 xs (Lax reflexive)
@@ -330,13 +223,13 @@ parser (Fail msg) penv1 penv2 fenv1 fenv2 xs env1 env2 =
   Err msg
 parser (Empty x) penv1 penv2 fenv1 fenv2 xs env1 env2 =
   Ok x xs (Lax reflexive)
-parser (Lit text x) penv1 penv2 fenv1 fenv2 xs env1 env2 =
+parser (Lit text f) penv1 penv2 fenv1 fenv2 xs env1 env2 =
   case xs of
     [] => Err "expected \{text}, got end of file"
     y :: ys =>
-      if y == text
-      then Ok x ys (Strict reflexive)
-      else Err "expected \{text}, got \{y}"
+      if y.val.kind == text
+      then Ok (f y.val.text) ys (Strict reflexive)
+      else Err "\{show y.bounds}: expected \{text}, got \{y.val.kind}"
 parser ((<**>) {nil1 = False, nil2} p q) penv1 penv2 fenv1 fenv2 xs env1 env2 =
   case parser p penv1 penv2 fenv1 fenv2 xs env1 env2 of
     Err msg => Err msg
@@ -372,15 +265,15 @@ parser ((<|>) {nil1, nil2} p q) penv1 penv2 fenv1 fenv2 xs env1 env2 =
       then parser q penv1 penv2 fenv1 fenv2 [] env1 env2
       else Err "unexpected end of input"
     x :: xs =>
-      if elem x (peek penv2 p)
+      if elem x.val.kind (peek penv2 p)
       then wknL (parser p penv1 penv2 fenv1 fenv2 (x :: xs) env1 env2) nil2
-      else if elem x (peek penv2 q)
+      else if elem x.val.kind (peek penv2 q)
       then wknR nil1 (parser q penv1 penv2 fenv1 fenv2 (x :: xs) env1 env2)
       else if nil1
       then parser p penv1 penv2 fenv1 fenv2 (x :: xs) env1 env2
       else if nil2
       then parser q penv1 penv2 fenv1 fenv2 (x :: xs) env1 env2
-      else Err "unexpected token \{x}"
+      else Err "\{show x.bounds}: unexpected \{x.val.kind}"
 parser (Fix {a, b, nil} x f p) penv1 penv2 fenv1 fenv2 xs env1 env2 =
   let g = parser p _ _ _ _ {wf} in
   let
@@ -390,7 +283,7 @@ parser (Fix {a, b, nil} x f p) penv1 penv2 fenv1 fenv2 xs env1 env2 =
         (\ys, rec, lte =>
           g ys
             (  mapProperty (\f, zs, 0 prf => f zs $ transX prf lte) env1
-            :< (\zs, prf => rec zs (toSmaller prf) (forget $ transX prf lte))
+            :< (x :- (\zs, prf => rec zs (toSmaller prf) (forget $ transX prf lte)))
             )
             (mapProperty (\f, zs, prf => f zs $ transX prf lte) env2))
         xs
@@ -403,7 +296,7 @@ parse :
   Eq i => Interpolation i =>
   (p : Parser i nil [<] [<] a) ->
   {auto 0 wf : WellTyped [<] [<] [<] [<] p} ->
-  (xs : List i) -> M xs nil a
+  (xs : List (WithBounds (Token i))) -> M xs nil a
 parse p xs = parser p [<] [<] [<] [<] xs [<] [<]
 
 -- Weakening -------------------------------------------------------------------
@@ -412,8 +305,8 @@ public export
 rename :
   (len1 : Length locked1) ->
   (len2 : Length locked2) ->
-  (forall x. Variable locked1 x -> Variable locked2 x) ->
-  (forall x. Variable free1 x -> Variable free2 x) ->
+  (forall x. Var locked1 x -> Var locked2 x) ->
+  (forall x. Var free1 x -> Var free2 x) ->
   Parser i nil locked1 free1 a -> Parser i nil locked2 free2 a
 rename len1 len2 ren1 ren2 (Var f x) = Var f (ren2 x)
 rename len1 len2 ren1 ren2 (Fail msg) = Fail msg
@@ -428,6 +321,27 @@ rename len1 len2 ren1 ren2 (p <|> q) =
   rename len1 len2 ren1 ren2 p <|> rename len1 len2 ren1 ren2 q
 rename len1 len2 ren1 ren2 (Fix x f p) =
   Fix x f (rename (S len1) (S len2) (lift {len = S Z} ren1) ren2 p)
+
+public export
+weaken :
+  (len1 : Length free2) ->
+  {auto len2 : Length locked} ->
+  Parser i nil (free2 ++ locked) free1 a -> Parser i nil locked (free1 ++ free2) a
+weaken len1 (Var f x) = Var f (wknL x)
+weaken len1 (Fail msg) = Fail msg
+weaken len1 (Empty x) = Empty x
+weaken len1 (Lit text x) = Lit text x
+weaken len1 ((<**>) {nil1 = False} p q) =
+  weaken len1 p <**>
+  rename Z Z
+    id
+    ( either (wknL . wknL) (either (wknL . wknR) wknR . split)
+    . split {len = lengthAppend len1 len2}
+    )
+    q
+weaken len1 ((<**>) {nil1 = True} p q) = weaken len1 p <**> weaken len1 q
+weaken len1 (p <|> q) = weaken len1 p <|> weaken len1 q
+weaken len1 (Fix x f p) = Fix x f (weaken len1 p)
 
 public export
 shift :
@@ -465,15 +379,8 @@ public export
 p <** q = const <$> p <**> q
 
 public export
-match : i -> Parser i False locked free ()
-match x = Lit x ()
-
-public export
-oneOf : (xs : List i) -> {auto 0 _ : NonEmpty xs} -> Parser i False locked free (x ** Elem x xs)
-oneOf [x] = (x ** Here) <$ match x
-oneOf (x :: xs@(_ :: _)) =
-  (x ** Here) <$ match x <|>
-  (\y => (y.fst ** There y.snd)) <$> oneOf xs
+match : TokenKind i => (kind : i) -> Parser i False locked free (TokType kind)
+match kind = Lit kind (tokValue kind)
 
 public export
 option : Parser i False locked free a -> Parser i True locked free (Maybe a)

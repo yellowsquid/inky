@@ -6,12 +6,17 @@ options = "--total"
 
 depends = contrib
 
+executable = inky
+main = Inky
+
 modules
   = Data.Maybe.Decidable
   , Data.These.Decidable
+  , Inky
   , Inky.Context
   , Inky.Parser
   , Inky.Term
+  , Inky.Term.Parser
   , Inky.Term.Pretty
   , Inky.Thinning
   , Inky.Type

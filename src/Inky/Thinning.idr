@@ -20,13 +20,14 @@ data Thins : Context a -> Context a -> Type where
 
 -- Basics
 
+public export
 indexPos : (f : ctx1 `Thins` ctx2) -> (pos : VarPos ctx1 x v) -> Var ctx2 v
 indexPos Id pos = toVar pos
 indexPos (Drop f) pos = ThereVar (indexPos f pos)
 indexPos (Keep f) Here = toVar Here
 indexPos (Keep f) (There pos) = ThereVar (indexPos f pos)
 
-export
+public export
 index : ctx1 `Thins` ctx2 -> Var ctx1 v -> Var ctx2 v
 index f i = indexPos f i.pos
 
@@ -52,24 +53,6 @@ indexPosInjective (Keep f) {i = There i} {j = There j} prf =
 export
 indexInjective : (f : ctx1 `Thins` ctx2) -> {i, j : Var ctx1 v} -> index f i = index f j -> i = j
 indexInjective f {i = %% x, j = %% y} prf = toVarCong (indexPosInjective f $ toNatCong' prf)
-
-export
-indexId : (0 i : Var ctx v) -> index Id i = i
-indexId (%% x) = Refl
-
-export
-indexDrop : (0 f : ctx1 `Thins` ctx2) -> (0 i : Var ctx1 v) -> index (Drop f) i = ThereVar (index f i)
-indexDrop f (%% x) = Refl
-
-export
-indexKeepHere : (0 f : ctx1 `Thins` ctx2) -> index (Keep {x, y} f) (%% x) = (%% y)
-indexKeepHere f = Refl
-
-export
-indexKeepThere :
-  (0 f : ctx1 `Thins` ctx2) -> (0 i : Var ctx1 v) ->
-  index (Keep f) (ThereVar i) = ThereVar (index f i)
-indexKeepThere f (%% x) = Refl
 
 indexPosComp :
   (f : ctx2 `Thins` ctx3) -> (g : ctx1 `Thins` ctx2) -> (pos : VarPos ctx1 x v) ->
@@ -117,6 +100,80 @@ export
 (.index) : f ~~~ g -> (i : Var ctx1 v) -> index f i = index g i
 prf.index i = prf.indexPos i.pos
 
+-- Useful for Parsers ----------------------------------------------------------
+
+public export
+dropAll : Length ctx2 -> ctx1 `Thins` ctx1 ++ ctx2
+dropAll Z = Id
+dropAll (S len) = Drop (dropAll len)
+
+public export
+keepAll : Length ctx -> ctx1 `Thins` ctx2 -> ctx1 ++ ctx `Thins` ctx2 ++ ctx
+keepAll Z f = f
+keepAll (S {x = x :- _} len) f = Keep (keepAll len f)
+
+public export
+append :
+  ctx1 `Thins` ctx3 -> ctx2 `Thins` ctx4 ->
+  {auto len : Length ctx4} ->
+  ctx1 ++ ctx2 `Thins` ctx3 ++ ctx4
+append f Id = keepAll len f
+append f (Drop g) {len = S len} = Drop (append f g)
+append f (Keep g) {len = S len} = Keep (append f g)
+
+public export
+assoc : Length ctx3 -> ctx1 ++ (ctx2 ++ ctx3) `Thins` (ctx1 ++ ctx2) ++ ctx3
+assoc Z = Id
+assoc (S {x = x :- _} len) = Keep (assoc len)
+
+public export
+growLength : ctx1 `Thins` ctx2 -> Length ctx1 -> Length ctx2
+growLength Id len = len
+growLength (Drop f) len = S (growLength f len)
+growLength (Keep f) (S len) = S (growLength f len)
+
+public export
+thinLength : ctx1 `Thins` ctx2 -> Length ctx2 -> Length ctx1
+thinLength Id len = len
+thinLength (Drop f) (S len) = thinLength f len
+thinLength (Keep f) (S len) = S (thinLength f len)
+
+public export
+thinAll : ctx1 `Thins` ctx2 -> All p ctx2 -> All p ctx1
+thinAll Id env = env
+thinAll (Drop f) (env :< (x :- px)) = thinAll f env
+thinAll (Keep {x, y} f) (env :< (_ :- px)) = thinAll f env :< (x :- px)
+
+public export
+splitL :
+  {0 ctx1, ctx2, ctx3 : Context a} ->
+  Length ctx3 ->
+  ctx1 `Thins` ctx2 ++ ctx3 ->
+  Exists (\ctxA => Exists (\ctxB => (ctx1 = ctxA ++ ctxB, ctxA `Thins` ctx2, ctxB `Thins` ctx3)))
+splitL Z f = Evidence ctx1 (Evidence [<] (Refl, f, Id))
+splitL (S len) Id = Evidence ctx2 (Evidence ctx3 (Refl, Id, Id))
+splitL (S len) (Drop f) =
+  let Evidence ctxA (Evidence ctxB (Refl, g, h)) = splitL len f in
+  Evidence ctxA (Evidence ctxB (Refl, g, Drop h))
+splitL (S len) (Keep f) =
+  let Evidence ctxA (Evidence ctxB (Refl, g, h)) = splitL len f in
+  Evidence ctxA (Evidence (ctxB :< _) (Refl, g, Keep h))
+
+public export
+splitR :
+  {0 ctx1, ctx2, ctx3 : Context a} ->
+  Length ctx2 ->
+  ctx1 ++ ctx2 `Thins` ctx3 ->
+  Exists (\ctxA => Exists (\ctxB => (ctx3 = ctxA ++ ctxB, ctx1 `Thins` ctxA, ctx2 `Thins` ctxB)))
+splitR Z f = Evidence ctx3 (Evidence [<] (Refl, f, Id))
+splitR (S len) Id = Evidence ctx1 (Evidence ctx2 (Refl, Id, Id))
+splitR (S len) (Drop f) =
+  let Evidence ctxA (Evidence ctxB (Refl, g, h)) = splitR (S len) f in
+  Evidence ctxA (Evidence (ctxB :< _) (Refl, g, Drop h))
+splitR (S len) (Keep f) =
+  let Evidence ctxA (Evidence ctxB (Refl, g, h)) = splitR len f in
+  Evidence ctxA (Evidence (ctxB :< _) (Refl, g, Keep h))
+
 --------------------------------------------------------------------------------
 -- Environments ----------------------------------------------------------------
 --------------------------------------------------------------------------------
@@ -145,7 +202,7 @@ lookup env i = lookupPos env i.pos
 export
 lookupHere :
   (0 env : Env ctx1 ctx2 p) -> (0 x : String) -> (0 pv : p v) ->
-  lookup (env :< (x :- pv)) (%% x) = Right pv
+  lookup (env :< (x :- pv)) (toVar Here) = Right pv
 lookupHere env x pv = Refl
 
 export

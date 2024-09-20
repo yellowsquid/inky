@@ -65,7 +65,7 @@ thinCongAll prf (as :< (x :- a)) =
 thinId : (a : Ty ctx v) -> thin Id a = a
 thinIdAll : (as : Row (Ty ctx v)) -> thinAll Id as = as
 
-thinId (TVar i) = cong TVar (indexId i)
+thinId (TVar (%% x)) = Refl
 thinId TNat = Refl
 thinId (TArrow a b) = cong2 TArrow (thinId a) (thinId b)
 thinId (TProd as) = cong TProd (thinIdAll as)

@@ -7,14 +7,12 @@ import Data.Bool.Decidable
 import Data.Maybe.Decidable
 import Data.DPair
 import Data.Nat
+import Decidable.Equality
 
 -- Contexts --------------------------------------------------------------------
 
 export
 infix 2 :-
-
-export
-prefix 2 %%
 
 public export
 record Assoc (a : Type) where
@@ -72,7 +70,7 @@ public export
 ctx ++ [<] = ctx
 ctx ++ ctx' :< x = (ctx ++ ctx') :< x
 
-export
+public export
 lengthAppend : Length ctx1 -> Length ctx2 -> Length (ctx1 ++ ctx2)
 lengthAppend len1 Z = len1
 lengthAppend len1 (S len2) = S (lengthAppend len1 len2)
@@ -83,9 +81,11 @@ length (ctx :< x) = S (length ctx)
 
 -- Variables -------------------------------------------------------------------
 
+export prefix 2 %%
+
 public export
-data VarPos : Context a -> (0 x : String) -> a -> Type where
-  [search x]
+data VarPos : (ctx : Context a) -> (0 x : String) -> a -> Type where
+  [search ctx]
   Here : VarPos (ctx :< (x :- v)) x v
   There : VarPos ctx x v -> VarPos (ctx :< y) x v
 
@@ -171,28 +171,31 @@ reflectEq ((%%) x {pos = pos1}) ((%%) y {pos = pos2})
 
 -- Weakening
 
+public export
 wknLPos : VarPos ctx1 x v -> Length ctx2 -> VarPos (ctx1 ++ ctx2) x v
 wknLPos pos Z = pos
 wknLPos pos (S len) = There (wknLPos pos len)
 
+public export
 wknRPos : VarPos ctx2 x v -> VarPos (ctx1 ++ ctx2) x v
 wknRPos Here = Here
 wknRPos (There pos) = There (wknRPos pos)
 
+public export
 splitPos : Length ctx2 -> VarPos (ctx1 ++ ctx2) x v -> Either (VarPos ctx1 x v) (VarPos ctx2 x v)
 splitPos Z pos = Left pos
 splitPos (S len) Here = Right Here
 splitPos (S len) (There pos) = mapSnd There $ splitPos len pos
 
-export
+public export
 wknL : {auto len : Length ctx2} -> Var ctx1 v -> Var (ctx1 ++ ctx2) v
 wknL i = toVar $ wknLPos i.pos len
 
-export
+public export
 wknR : Var ctx2 v -> Var (ctx1 ++ ctx2) v
 wknR i = toVar $ wknRPos i.pos
 
-export
+public export
 split : {auto len : Length ctx2} -> Var (ctx1 ++ ctx2) x -> Either (Var ctx1 x) (Var ctx2 x)
 split i = bimap toVar toVar $ splitPos len i.pos
 
@@ -213,6 +216,19 @@ export
 nameOf : {ctx : Context a} -> (i : Var ctx v) -> Singleton i.name
 nameOf i = nameOfPos i.pos
 
+-- Search
+
+lookupPos : (x : String) -> (ctx : Context a) -> Maybe (v ** VarPos ctx x v)
+lookupPos x [<] = Nothing
+lookupPos x (ctx :< (y :- v)) =
+  case decEq x y of
+    Yes Refl => Just (v ** Here)
+    No neq => bimap id There <$> lookupPos x ctx
+
+export
+lookup : (x : String) -> (ctx : Context a) -> Maybe (v ** Var ctx v)
+lookup x ctx = bimap id toVar <$> lookupPos x ctx
+
 -- Environments ----------------------------------------------------------------
 
 namespace Quantifier
@@ -226,11 +242,12 @@ namespace Quantifier
 
   %name Quantifier.All env
 
+  public export
   indexAllPos : VarPos ctx x v -> All p ctx -> p v
   indexAllPos Here (env :< px) = px.value
   indexAllPos (There pos) (env :< px) = indexAllPos pos env
 
-  export
+  public export
   indexAll : Var ctx v -> All p ctx -> p v
   indexAll i env = indexAllPos i.pos env
 
@@ -239,10 +256,15 @@ namespace Quantifier
   mapProperty f [<] = [<]
   mapProperty f (env :< (x :- px)) = mapProperty f env :< (x :- f px)
 
-  export
+  public export
   (++) : All p ctx1 -> All p ctx2 -> All p (ctx1 ++ ctx2)
   env1 ++ [<] = env1
   env1 ++ env2 :< px = (env1 ++ env2) :< px
+
+  public export
+  split : Length ctx2 -> All p (ctx1 ++ ctx2) -> (All p ctx1, All p ctx2)
+  split Z env = (env, [<])
+  split (S len) (env :< px) = mapSnd (:< px) $ split len env
 
 -- Rows ------------------------------------------------------------------------
 
@@ -274,7 +296,6 @@ namespace Row
   mapFresh f [<] = id
   mapFresh f (row :< (y :- _)) = andSo . mapSnd (mapFresh f row) . soAnd
 
-  public export
   Functor Row where
     map = Row.map
 
@@ -294,6 +315,13 @@ namespace Row
   forget : Row a -> Context a
   forget [<] = [<]
   forget (row :< x) = forget row :< x
+
+  export
+  extend : Row a -> Assoc a -> Maybe (Row a)
+  extend row (x :- v) =
+    case choose (x `freshIn` row) of
+      Left fresh => Just (row :< (x :- v))
+      Right _ => Nothing
 
   -- Equality --
 

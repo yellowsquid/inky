@@ -31,10 +31,10 @@ prettyAllCheck :
   List (CheckTerm tyCtx tmCtx) -> Prec -> List (Doc ann)
 prettyCheckCtx :
   {tyCtx, tmCtx : Context ()} ->
-  Context (CheckTerm tyCtx tmCtx) -> Prec -> List (Doc ann)
+  Row (CheckTerm tyCtx tmCtx) -> Prec -> List (Doc ann)
 prettyCheckCtxBinding :
   {tyCtx, tmCtx : Context ()} ->
-  Context (x ** CheckTerm tyCtx (tmCtx :< (x :- ()))) -> Prec -> List (Doc ann)
+  Row (x ** CheckTerm tyCtx (tmCtx :< (x :- ()))) -> Prec -> List (Doc ann)
 
 prettySynth (Var i) d = pretty (unVal $ nameOf i)
 prettySynth (Lit k) d = pretty k

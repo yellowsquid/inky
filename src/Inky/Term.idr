@@ -37,10 +37,10 @@ data CheckTerm where
     CheckTerm tyCtx tmCtx
   Abs : (bound : Context ()) -> CheckTerm tyCtx (tmCtx ++ bound) -> CheckTerm tyCtx tmCtx
   Inj : String -> CheckTerm tyCtx tmCtx -> CheckTerm tyCtx tmCtx
-  Tup : Context (CheckTerm tyCtx tmCtx) -> CheckTerm tyCtx tmCtx
+  Tup : Row (CheckTerm tyCtx tmCtx) -> CheckTerm tyCtx tmCtx
   Case :
     SynthTerm tyCtx tmCtx ->
-    Context (x ** CheckTerm tyCtx (tmCtx :< (x :- ()))) ->
+    Row (x ** CheckTerm tyCtx (tmCtx :< (x :- ()))) ->
     CheckTerm tyCtx tmCtx
   Contract : CheckTerm tyCtx tmCtx -> CheckTerm tyCtx tmCtx
   Fold :
@@ -243,11 +243,11 @@ CheckSpine :
   (fun : Ty tyCtx ()) -> List (CheckTerm tyCtx tmCtx) -> (res : Ty tyCtx ()) -> Type
 AllCheck :
   {tyCtx, tmCtx : Context ()} -> (env : All (const (Ty tyCtx ())) tmCtx) ->
-  Row (Ty tyCtx ()) -> Context (CheckTerm tyCtx tmCtx) -> Type
+  Row (Ty tyCtx ()) -> Row (CheckTerm tyCtx tmCtx) -> Type
 AllCheckBinding :
   {tyCtx, tmCtx : Context ()} -> (env : All (const (Ty tyCtx ())) tmCtx) ->
   Row (Ty tyCtx ()) -> Ty tyCtx () ->
-  Context (x : String ** CheckTerm tyCtx (tmCtx :< (x :- ()))) ->
+  Row (x : String ** CheckTerm tyCtx (tmCtx :< (x :- ()))) ->
   Type
 
 Synths env (Var i) a = (a = indexAll i env)
@@ -357,7 +357,7 @@ AllCheckBinding env as a (ts :< (x :- (y ** t))) =
 -- Reordering
 
 allCheckReorder :
-  as <~> bs -> (ts : Context (CheckTerm tyCtx tmCtx)) ->
+  as <~> bs -> (ts : Row (CheckTerm tyCtx tmCtx)) ->
   AllCheck env as ts -> AllCheck env bs ts
 allCheckReorder [] [<] Refl = Refl
 allCheckReorder (_ :: _) [<] Refl impossible
@@ -365,7 +365,7 @@ allCheckReorder prf (ts :< (x :- t)) (a ** bs ** (prf1, prf2, prf3)) =
   (a ** bs ** (Evidence prf1.fst (trans (sym prf) prf1.snd), prf2, prf3))
 
 allCheckBindingReorder :
-  as <~> bs -> (ts : Context (x ** CheckTerm tyCtx (tmCtx :< (x :- ())))) ->
+  as <~> bs -> (ts : Row (x ** CheckTerm tyCtx (tmCtx :< (x :- ())))) ->
   AllCheckBinding env as a ts -> AllCheckBinding env bs a ts
 allCheckBindingReorder [] [<] Refl = Refl
 allCheckBindingReorder (_ :: _) [<] Refl impossible
@@ -422,11 +422,11 @@ checkSpine :
   (fun : Ty tyCtx ()) -> List (CheckTerm tyCtx tmCtx) -> Maybe (Ty tyCtx ())
 allCheck :
   (env : All (const (Ty tyCtx ())) tmCtx) ->
-  Row (Ty tyCtx ()) -> Context (CheckTerm tyCtx tmCtx) -> Bool
+  Row (Ty tyCtx ()) -> Row (CheckTerm tyCtx tmCtx) -> Bool
 allCheckBinding :
   (env : All (const (Ty tyCtx ())) tmCtx) ->
   Row (Ty tyCtx ()) -> Ty tyCtx () ->
-  Context (x ** CheckTerm tyCtx (tmCtx :< (x :- ()))) ->
+  Row (x ** CheckTerm tyCtx (tmCtx :< (x :- ()))) ->
   Bool
 
 synths env (Var i) = Just (indexAll i env)
@@ -532,13 +532,13 @@ partial
 partial
 0 reflectAllCheck :
   (env : All (const $ Ty tyCtx ()) tmCtx) ->
-  (as : Row (Ty tyCtx ())) -> (ts : Context (CheckTerm tyCtx tmCtx)) ->
+  (as : Row (Ty tyCtx ())) -> (ts : Row (CheckTerm tyCtx tmCtx)) ->
   AllCheck env as ts `Reflects` allCheck env as ts
 partial
 0 reflectAllCheckBinding :
   (env : All (const $ Ty tyCtx ()) tmCtx) ->
   (as : Row (Ty tyCtx ())) -> (a : Ty tyCtx ()) ->
-  (ts : Context (x ** CheckTerm tyCtx (tmCtx :< (x :- ())))) ->
+  (ts : Row (x ** CheckTerm tyCtx (tmCtx :< (x :- ())))) ->
   AllCheckBinding env as a ts `Reflects` allCheckBinding env as a ts
 
 reflectSynths env (Var i) = RJust Refl

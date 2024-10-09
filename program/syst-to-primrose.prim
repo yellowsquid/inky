@@ -1,0 +1,77 @@
+let Prim =
+(\X =>
+  [ Var: Nat
+  , Lit: Nat
+  , Suc: X
+  , Abs: X
+  , App: <Fun: X, Arg: X>
+  , Unit: <>
+  , Pair: <Fst: X, Snd: X>
+  , Fst: X
+  , Snd: X
+  , Absurd: <Target: X>
+  , Inl: X
+  , Inr: X
+  , Case: <Target: X, Left: X, Right: X>
+  , Expand: X
+  , Contract: X
+  , Fold: <Target: X, Body: X>
+  , Let: <Bound: X, Body: X>
+  , Annot:
+    < Term: X
+    , Type: (\Y =>
+      [ Var: Nat
+      , N: <>
+      , Arrow: <Dom: Y, Cod: Y>
+      , Unit: <>
+      , Pair: <Fst: Y, Snd: Y>
+      , Bottom: <>
+      , Sum: <Left: Y, Right: Y>
+      , Fix: Y
+      ])
+    >
+  ])
+in
+let lift (f : Nat -> Nat) (x : Nat) : Nat =
+  case !x of
+    { Z u => 0
+    ; S n => suc (f n)
+    }
+in
+let rename (t : Prim) : (Nat -> Nat) -> Prim =
+  foldcase t by
+    { Var n => \f => ~(Var (f n))
+    ; Lit n => \f => ~(Lit n)
+    ; Suc t => \f => ~(Suc (t f))
+    ; Abs t => \f => ~(Abs (t (lift f)))
+    ; App p => \f => ~(App <Fun: p.Fun f, Arg: p.Arg f>)
+    ; Unit u => \f => ~(Unit u)
+    ; Pair p => \f => ~(Pair <Fst: p.Fst f, Snd: p.Snd f>)
+    ; Fst t => \f => ~(Fst (t f))
+    ; Snd t => \f => ~(Snd (t f))
+    ; Absurd p => \f => ~(Absurd <Target: p.Target f>)
+    ; Inl t => \f => ~(Inl (t f))
+    ; Inr t => \f => ~(Inr (t f))
+    ; Case p => \f => ~(Case <Target: p.Target f, Left: p.Left (lift f), Right: p.Right (lift f)>)
+    ; Expand t => \f => ~(Expand (t f))
+    ; Contract t => \f => ~(Contract (t f))
+    ; Fold p => \f => ~(Fold <Target: p.Target f, Body: p.Body (lift f)>)
+    ; Let p => \f => ~(Let <Bound: p.Bound f, Body: p.Body (lift f)>)
+    ; Annot p => \f => ~(Annot <Term: p.Term f, Type: p.Type>)
+    }
+in
+\p => foldcase p by
+  { Var n => ~(Var n)
+  ; Zero u => ~(Lit 0)
+  ; Suc e => ~(Suc e)
+  ; Abs e => ~(Abs e)
+  ; App p => ~(App p)
+  ; Rec p => ~(Fold
+      < Target: p.Target
+      , Body: ~(Case
+        < Target: ~(Var 0)
+        , Left: rename p.Zero (\x => suc (suc x))
+        , Right: rename p.Suc (lift suc)
+        >)
+      >)
+  }

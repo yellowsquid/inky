@@ -406,3 +406,16 @@ subAll env ((:<) as (x :- a) {fresh}) =
 
 subAllFresh env x [<] = id
 subAllFresh env x (as :< (y :- a)) = andSo . mapSnd (subAllFresh env x as) . soAnd
+
+-- Expansion -------------------------------------------------------------------
+
+export
+expandEnv : DEnv Ty ctx -> Env ctx [<] (Ty [<])
+expandEnv [<] = Base Id
+expandEnv {ctx = ctx :< (x :- v)} (env :< (y :- a)) =
+  let env' = expandEnv env in
+  expandEnv env :< (x :- sub env' a)
+
+export
+expand : DEnv Ty ctx -> Ty ctx v -> Ty [<] v
+expand = sub . expandEnv

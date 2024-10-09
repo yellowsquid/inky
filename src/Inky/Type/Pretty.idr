@@ -19,7 +19,7 @@ prettyType TNat d = pretty "Nat"
 prettyType (TArrow a b) d =
   parenthesise (d > arrowPrec) $ group $ align $ hang 2 $
     let parts = stripArrow b in
-    concatWith (surround $ "->" <+> line) (prettyType a arrowPrec :: parts)
+    concatWith (surround $ neutral <++> "->" <+> line) (prettyType a arrowPrec :: parts)
   where
   stripArrow : Ty ctx () -> List (Doc ann)
   stripArrow (TArrow a b) = prettyType a arrowPrec :: stripArrow b

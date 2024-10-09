@@ -360,6 +360,42 @@ namespace M
     map f (Ok res ys prf) = Ok (f res) ys prf
 
   export
+  pure : {xs : List a} -> (x : b) -> M xs True b
+  pure x = Ok x xs (Lax reflexive)
+
+  export
+  (>>=) :
+    M xs nil b ->
+    (b -> {ys : List a} -> {auto 0 prf : SmallerX nil ys xs} -> M ys nil' c) ->
+    M xs (nil && nil') c
+  Err str >>= f = Err str
+  Ok res ys prf >>= f =
+    case f {ys, prf} res of
+      Err str => Err str
+      Ok res' zs prf' => Ok res' zs (rewrite andCommutative nil nil' in transX prf' prf)
+
+  export
+  take :
+    Eq a =>
+    Interpolation a =>
+    (toks : List a) ->
+    (xs : List (WithBounds (Token a))) ->
+    M xs False String
+  take [tok] [] = Err "expected \{tok}; got end of input"
+  take toks [] = Err "expected one of: \{join ", " $ map (\k => "\{k}") toks}; got end of input"
+  take toks (x :: xs) =
+    if x.val.kind `elem` toks
+    then Ok x.val.text xs (Strict reflexive)
+    else case toks of
+      [tok] => Err "\{x.bounds}: expected \{tok}; got \{x.val.kind}"
+      toks => Err "\{x.bounds}: expected one of: \{join ", " $ map (\k => "\{k}") toks}; got \{x.val.kind}"
+
+  export
+  bounds : (xs : List (WithBounds a)) -> M xs True (Bool, Bounds)
+  bounds [] = Ok (True, MkBounds (-1) (-1) (-1) (-1)) [] (Lax reflexive)
+  bounds (x :: xs) = Ok (x.isIrrelevant, x.bounds) (x :: xs) (Lax reflexive)
+
+  export
   wknL : M xs b1 a -> (b2 : Bool) -> M xs (b1 || b2) a
   wknL (Err msg) b2 = Err msg
   wknL (Ok res ys prf) b2 = Ok res ys (wknSmallerL prf b2)
@@ -381,30 +417,34 @@ namespace M
 
 -- The Big Function
 
-data FirstNil : List Bool -> Type where
-  Here : FirstNil (True :: bs)
-  There : FirstNil bs -> FirstNil (False :: bs)
-
-findNil : (nils : List Bool) -> Maybe (FirstNil nils)
-findNil [] = Nothing
-findNil (False :: bs) = There <$> findNil bs
-findNil (True :: bs) = Just Here
-
-memberOf : Eq a => (x : a) -> All.All (const $ List a) xs -> Maybe (Any (const ()) xs)
-memberOf x [] = Nothing
-memberOf x (xs :: xss) =
-  if x `elem` xs
-  then Just (Here ())
-  else There <$> (x `memberOf` xss)
+||| Searches `sets` for the first occurence of `x`.
+||| On failure, returns the index for the nil element, if it exists.
+|||
+||| # Unsafe Invariants
+||| * `nils` has at most one `True` element
+||| * `sets` are disjoint
+lookahead :
+  Eq a =>
+  (x : Maybe a) ->
+  (nils : List Bool) ->
+  (sets : Lazy (All (const $ List a) nils)) ->
+  Maybe (Any (const ()) nils)
+lookahead x [] [] = Nothing
+lookahead x (nil :: nils) (set :: sets) =
+  (do
+    x <- x
+    if x `elem` set then Just (Here ()) else Nothing)
+  <|> There <$> lookahead x nils sets
+  <|> (if nil then Just (Here ()) else Nothing)
 
 parser :
   (e : Eq i) => Interpolation i =>
   (p : Parser i nil locked free a) ->
-  (penv1 : _) ->
-  (penv2 : _) ->
-  (fenv1 : _) ->
-  (fenv2 : _) ->
-  {auto 0 wf : So (wellTyped e penv1 penv2 fenv1 fenv2 p)} ->
+  {penv1 : _} ->
+  {penv2 : _} ->
+  {0 fenv1 : _} ->
+  {0 fenv2 : _} ->
+  (0 wf : So (wellTyped e penv1 penv2 fenv1 fenv2 p)) ->
   (xs : List (WithBounds (Token i))) ->
   All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX False ys xs) -> uncurry (M ys) x) locked ->
   All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX True ys xs) -> uncurry (M ys) x) free ->
@@ -412,140 +452,96 @@ parser :
 parserChain :
   (e : Eq i) => Interpolation i =>
   (ps : ParserChain i nil locked free as) ->
-  (penv1 : _) ->
-  (penv2 : _) ->
-  (fenv1 : _) ->
-  (fenv2 : _) ->
-  {auto 0 wf : So (wellTypedChain e penv1 penv2 fenv1 fenv2 ps)} ->
+  {penv1 : _} ->
+  {penv2 : _} ->
+  {0 fenv1 : _} ->
+  {0 fenv2 : _} ->
+  (0 wf : So (wellTypedChain e penv1 penv2 fenv1 fenv2 ps)) ->
   (xs : List (WithBounds (Token i))) ->
   All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX False ys xs) -> uncurry (M ys) x) locked ->
   All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX True ys xs) -> uncurry (M ys) x) free ->
   M xs nil (HList as)
-parserNil :
-  (e : Eq i) => Interpolation i =>
-  (at : FirstNil nils) ->
-  (ps : All (\nil => Parser i nil locked free a) nils) ->
-  (penv1 : _) ->
-  (penv2 : _) ->
-  (fenv1 : _) ->
-  (fenv2 : _) ->
-  {auto 0 wf : So (allWellTyped e penv1 penv2 fenv1 fenv2 ps)} ->
-  (xs : List (WithBounds (Token i))) ->
-  All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX False ys xs) -> uncurry (M ys) x) locked ->
-  All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX True ys xs) -> uncurry (M ys) x) free ->
-  M xs (any Basics.id nils) a
 parserOneOf :
   (e : Eq i) => Interpolation i =>
   {nils : List Bool} ->
   (at : Any (const ()) nils) ->
   (ps : All (\nil => Parser i nil locked free a) nils) ->
-  (penv1 : _) ->
-  (penv2 : _) ->
-  (fenv1 : _) ->
-  (fenv2 : _) ->
-  {auto 0 wf : So (allWellTyped e penv1 penv2 fenv1 fenv2 ps)} ->
-  (xs : List1 (WithBounds (Token i))) ->
-  All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX False ys (forget xs)) -> uncurry (M ys) x) locked ->
-  All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX True ys (forget xs)) -> uncurry (M ys) x) free ->
-  M (forget xs) (any Basics.id nils) a
+  {penv1 : _} ->
+  {penv2 : _} ->
+  {0 fenv1 : _} ->
+  {0 fenv2 : _} ->
+  (0 wf : So (allWellTyped e penv1 penv2 fenv1 fenv2 ps)) ->
+  (xs : List (WithBounds (Token i))) ->
+  All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX False ys xs) -> uncurry (M ys) x) locked ->
+  All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX True ys xs) -> uncurry (M ys) x) free ->
+  M xs (any Basics.id nils) a
 
-parser (Var x) penv1 penv2 fenv1 fenv2 xs env1 env2 =
+parser (Var x) wf xs env1 env2 =
   indexAll x env2 xs (Lax reflexive)
-parser (Lit text) penv1 penv2 fenv1 fenv2 xs env1 env2 =
-  case xs of
-    [] => Err "expected \{text}, got end of file"
-    y :: ys =>
-      if y.val.kind == text
-      then Ok y.val.text ys (Strict reflexive)
-      else Err "\{y.bounds}: expected \{text}, got \{y.val.kind}"
-parser (Seq ps) penv1 penv2 fenv1 fenv2 xs env1 env2 =
-  parserChain ps penv1 penv2 fenv1 fenv2 xs env1 env2
-parser (OneOf {nils} ps) penv1 penv2 fenv1 fenv2 [] env1 env2 {wf} =
-  let 0 wfs = soAnd {a = disjoint (forget $ peekAll penv2 ps)} wf in
-  case findNil nils of
-    Nothing => Err "unexpected end of input"
-    Just at => parserNil at ps penv1 penv2 fenv1 fenv2 [] env1 env2
-parser (OneOf {nils} ps) penv1 penv2 fenv1 fenv2 (x :: xs) env1 env2 {wf = wf} =
+parser (Lit text) wf xs env1 env2 = take [text] xs
+parser (Seq ps) wf xs env1 env2 =
+  parserChain ps wf xs env1 env2
+parser (OneOf {nils} ps) wf [] env1 env2 =
   let 0 wfs = soAnd {a = disjoint (forget $ peekAll penv2 ps)} wf in
   let sets = peekAll penv2 ps in
-  case x.val.kind `memberOf` sets of
-    Just at => parserOneOf at ps penv1 penv2 fenv1 fenv2 (x ::: xs) env1 env2
-    Nothing => case findNil nils of
-      Nothing =>
-        Err
-          "\{x.bounds}: expected one of: \{join ", " $ map (\k => "\{k}") $ concat $ forget sets}; got \{x.val.kind}"
-      Just at => parserNil at ps penv1 penv2 fenv1 fenv2 (x :: xs) env1 env2
-parser (Fix {a, nil} x p) penv1 penv2 fenv1 fenv2 xs env1 env2 =
-  let f = parser p _ _ _ _ {wf} in
-  let
-    res : M xs nil a
-    res =
-      sizeInd {P = \ys => (0 prf : SmallerX True ys xs) -> M ys nil a}
-        (\ys, rec, lte =>
-          f ys
-            (  mapProperty (\f, zs, 0 prf => f zs $ transX prf lte) env1
-            :< (x :- (\zs, prf => rec zs (toSmaller prf) (forget $ transX prf lte)))
-            )
-            (mapProperty (\f, zs, prf => f zs $ transX prf lte) env2))
-        xs
-        (Lax reflexive)
-  in
-  res
-parser (Map f p) penv1 penv2 fenv1 fenv2 xs env1 env2 =
-  f <$> parser p penv1 penv2 fenv1 fenv2 xs env1 env2
-parser (WithBounds p) penv1 penv2 fenv1 fenv2 xs env1 env2 =
-  case xs of
-    [] => irrelevantBounds <$> parser p penv1 penv2 fenv1 fenv2 [] env1 env2
-    (x :: xs) =>
-      (\y => MkBounded y x.isIrrelevant x.bounds) <$>
-      parser p penv1 penv2 fenv1 fenv2 (x :: xs) env1 env2
+  case lookahead Nothing nils sets of
+    Nothing => Err "unexpected end of input"
+    Just at => parserOneOf at ps (snd wfs) [] env1 env2
+parser (OneOf {nils} ps) wf (x :: xs) env1 env2 =
+  let 0 wfs = soAnd {a = disjoint (forget $ peekAll penv2 ps)} wf in
+  let sets = peekAll penv2 ps in
+  case lookahead (Just x.val.kind) nils sets of
+    Nothing => Err "\{x.bounds}: expected one of: \{join ", " $ map (\k => "\{k}") $ concat $ forget sets}; got \{x.val.kind}"
+    Just at => parserOneOf at ps (snd wfs) (x :: xs) env1 env2
+parser (Fix {a, nil} x p) wf xs env1 env2 =
+  let f = parser p wf in
+  sizeInd {P = \ys => (0 prf : SmallerX True ys xs) -> M ys nil a}
+    (\ys, rec, lte =>
+      f ys
+        (  mapProperty (\f, zs, 0 prf => f zs $ transX prf lte) env1
+        :< (x :- (\zs, prf => rec zs (toSmaller prf) (forget $ transX prf lte)))
+        )
+        (mapProperty (\f, zs, prf => f zs $ transX prf lte) env2))
+    xs (Lax reflexive)
+parser (Map f p) wf xs env1 env2 =
+  f <$> parser p wf xs env1 env2
+parser (WithBounds p) wf xs env1 env2 = do
+  (irrel, bounds) <- bounds xs
+  rewrite sym $ andTrueNeutral nil
+  x <- parser p wf _
+         (mapProperty (\f, zs, 0 prf => f zs $ transX {b2 = True} prf %search) env1)
+         (mapProperty (\f, zs, 0 prf => f zs $ transX prf %search) env2)
+  pure (MkBounded x irrel bounds)
 
-parserChain [] penv1 penv2 fenv1 fenv2 xs env1 env2 = Ok [] xs (Lax reflexive)
-parserChain ((::) {nil1 = False, nil2} p ps) penv1 penv2 fenv1 fenv2 xs env1 env2 =
+parserChain [] wf xs env1 env2 = Ok [] xs (Lax reflexive)
+parserChain ((::) {nil1 = False, nil2} p ps) wf xs env1 env2 =
   let 0 wfs = soAnd wf in
-  let 0 wfs' = soAnd (snd wfs) in
-  case parser p penv1 penv2 fenv1 fenv2 xs env1 env2 of
-    Err msg => Err msg
-    Ok x ys lt =>
-      case
-        parserChain ps [<] (penv2 ++ penv1) [<] (fenv2 ++ fenv1)
-          ys
+  let 0 wfs' = soAnd (snd wfs) in do
+    x <- parser p (fst wfs') xs env1 env2
+    y <- parserChain ps (snd wfs')
+          _
           [<]
-          (  mapProperty (\f, zs, 0 prf => f zs $ forget $ transX prf lt) env2
-          ++ mapProperty (\f, zs, 0 prf => f zs $ transX prf lt) env1
+          (  mapProperty (\f, zs, 0 prf => f zs $ forget $ transX {b2 = False} prf %search) env2
+          ++ mapProperty (\f, zs, 0 prf => f zs $ transX prf %search) env1
           )
-      of
-        Err msg => Err msg
-        Ok y zs prf => Ok (x :: y) zs (rewrite sym $ andFalseFalse nil2 in transX prf lt)
-parserChain ((::) {nil1 = True, nil2} p ps) penv1 penv2 fenv1 fenv2 xs env1 env2 =
+    pure (x :: y)
+parserChain ((::) {nil1 = True, nil2} p ps) wf xs env1 env2 =
   let 0 wfs = soAnd wf in
-  let 0 wfs' = soAnd (snd wfs) in
-  case parser p penv1 penv2 fenv1 fenv2 xs env1 env2 of
-    Err msg => Err msg
-    Ok x ys lte =>
-      case
-        parserChain ps penv1 penv2 fenv1 fenv2
-          ys
-          (mapProperty (\f, zs, prf => f zs $ transX prf lte) env1)
-          (mapProperty (\f, zs, prf => f zs $ transX prf lte) env2)
-      of
-        Err msg => Err msg
-        Ok y zs prf => Ok (x :: y) zs (rewrite sym $ andTrueNeutral nil2 in transX prf lte)
+  let 0 wfs' = soAnd (snd wfs) in do
+    x <- parser p (fst wfs') xs env1 env2
+    rewrite sym $ andTrueNeutral nil2
+    y <- parserChain ps (snd wfs')
+           _
+           (mapProperty (\f, zs, prf => f zs $ transX {b2 = True} prf %search) env1)
+           (mapProperty (\f, zs, prf => f zs $ transX prf %search) env2)
+    pure (x :: y)
 
-parserNil {nils = True :: nils} Here (p :: ps) penv1 penv2 fenv1 fenv2 xs env1 env2 =
+parserOneOf {nils = nil :: nils} (Here ()) (p :: ps) wf xs env1 env2 =
   let 0 wfs = soAnd wf in
-  rewrite anyTrue nils in
-  parser p penv1 penv2 fenv1 fenv2 xs env1 env2
-parserNil (There at) (p :: ps) penv1 penv2 fenv1 fenv2 xs env1 env2 =
+  anyR nils (parser p (fst wfs) xs env1 env2)
+parserOneOf {nils = nil :: nils} (There at) (p :: ps) wf xs env1 env2 =
   let 0 wfs = soAnd {a = wellTyped e penv1 penv2 fenv1 fenv2 p} wf in
-  parserNil at ps penv1 penv2 fenv1 fenv2 xs env1 env2
-
-parserOneOf {nils = nil :: nils} (Here ()) (p :: ps) penv1 penv2 fenv1 fenv2 xs env1 env2 =
-  let 0 wfs = soAnd wf in
-  anyR nils (parser p penv1 penv2 fenv1 fenv2 (forget xs) env1 env2)
-parserOneOf {nils = nil :: nils} (There at) (p :: ps) penv1 penv2 fenv1 fenv2 xs env1 env2 =
-  let 0 wfs = soAnd {a = wellTyped e penv1 penv2 fenv1 fenv2 p} wf in
-  anyL nil (parserOneOf at ps penv1 penv2 fenv1 fenv2 xs env1 env2)
+  anyL nil (parserOneOf at ps (snd wfs) xs env1 env2)
 
 export
 parse :
@@ -553,7 +549,7 @@ parse :
   (p : Parser i nil [<] [<] a) ->
   {auto 0 wf : So (wellTyped e [<] [<] [<] [<] p)} ->
   (xs : List (WithBounds (Token i))) -> M xs nil a
-parse p xs = parser p [<] [<] [<] [<] xs [<] [<]
+parse p xs = parser p wf xs [<] [<]
 
 -- Functor ---------------------------------------------------------------------
 

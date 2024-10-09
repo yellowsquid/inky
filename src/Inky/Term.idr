@@ -20,17 +20,21 @@ data CheckTerm : (tyCtx, tmCtx : Context ()) -> Type
 data SynthTerm where
   Var : Var tmCtx v -> SynthTerm tyCtx tmCtx
   Lit : Nat -> SynthTerm tyCtx tmCtx
-  Suc : CheckTerm tyCtx tmCtx -> SynthTerm tyCtx tmCtx
+  Suc : SynthTerm tyCtx tmCtx
   App :
     SynthTerm tyCtx tmCtx ->
     (args : List (CheckTerm tyCtx tmCtx)) ->
-    {auto 0 _ : NonEmpty args} ->
+    {auto 0 prf : NonEmpty args} ->
     SynthTerm tyCtx tmCtx
   Prj : SynthTerm tyCtx tmCtx -> String -> SynthTerm tyCtx tmCtx
   Expand : SynthTerm tyCtx tmCtx -> SynthTerm tyCtx tmCtx
   Annot : CheckTerm tyCtx tmCtx -> Ty tyCtx () -> SynthTerm tyCtx tmCtx
 
 data CheckTerm where
+  LetTy :
+    (x : String) -> Ty tyCtx () ->
+    CheckTerm (tyCtx :< (x :- ())) tmCtx ->
+    CheckTerm tyCtx tmCtx
   Let :
     (x : String) -> SynthTerm tyCtx tmCtx ->
     CheckTerm tyCtx (tmCtx :< (x :- ())) ->
@@ -178,14 +182,13 @@ IsFunction :
   Type
 IsFunction [<] fun dom cod = (dom = [<], cod = fun)
 IsFunction (bound :< (x :- ())) fun dom cod =
-  ( b ** c **
-  ( IsArrow fun b c
-  , ( dom' **
-    ( dom = dom' :< (x :- b)
-    , IsFunction bound c dom' cod
+  ( dom' ** cod' **
+  ( IsFunction bound fun dom' cod'
+  , ( b **
+    ( IsArrow cod' b cod
+    , dom = dom' :< (x :- b)
     ))
   ))
-
 
 isFunctionUnique :
   (bound : Context ()) -> (a : Ty tyCtx ()) ->
@@ -193,17 +196,17 @@ isFunctionUnique :
   IsFunction bound a dom1 cod1 -> IsFunction bound a dom2 cod2 -> (dom1 = dom2, cod1 = cod2)
 isFunctionUnique [<] a (Refl, Refl) (Refl, Refl) = (Refl, Refl)
 isFunctionUnique (bound :< (x :- ())) a
-  (b1 ** c1 ** (isArrow1, (dom1' ** (Refl, isFunc1))))
-  (b2 ** c2 ** (isArrow2, (dom2' ** (Refl, isFunc2))))
-  with (isArrowUnique a isArrow1 isArrow2)
+  (dom1 ** cod1 ** (isFunc1, (b1 ** (isArrow1, eq1))))
+  (dom2 ** cod2 ** (isFunc2, (b2 ** (isArrow2, eq2))))
+  with (isFunctionUnique bound a isFunc1 isFunc2)
   isFunctionUnique (bound :< (x :- ())) a
-    (b ** c ** (_, (dom1' ** (Refl, isFunc1))))
-    (b ** c ** (_, (dom2' ** (Refl, isFunc2))))
+    (dom ** cod ** (_, (b1 ** (isArrow1, eq1))))
+    (dom ** cod ** (_, (b2 ** (isArrow2, eq2))))
     | (Refl, Refl)
-    with (isFunctionUnique bound c isFunc1 isFunc2)
+    with (isArrowUnique cod isArrow1 isArrow2)
     isFunctionUnique (bound :< (x :- ())) a
-      (b ** c ** (_, (dom' ** (Refl, _))))
-      (b ** c ** (_, (dom' ** (Refl, _))))
+      (dom ** cod ** (_, (b ** (isArrow1, Refl))))
+      (dom ** cod ** (_, (b ** (isArrow2, Refl))))
       | (Refl, Refl) | (Refl, Refl) = (Refl, Refl)
 
 isFunction :
@@ -211,154 +214,168 @@ isFunction :
   Maybe (All (const $ Ty tyCtx ()) bound, Ty tyCtx ())
 isFunction [<] a = Just ([<], a)
 isFunction (bound :< (x :- ())) a = do
-  (b, c) <- isArrow a
-  (dom, cod) <- isFunction bound c
+  (dom, cod) <- isFunction bound a
+  (b, cod) <- isArrow cod
   Just (dom :< (x :- b), cod)
 
 reflectIsFunction :
   (bound : Context ()) -> (a : Ty tyCtx ()) ->
   uncurry (IsFunction bound a) `OnlyWhen` isFunction bound a
 reflectIsFunction [<] a = RJust (Refl, Refl)
-reflectIsFunction (bound :< (x :- ())) a with (reflectIsArrow a) | (isArrow a)
-  _ | RJust isArrow | Just (b, c) with (reflectIsFunction bound c) | (isFunction bound c)
-    _ | RJust isFunc | Just (dom, cod) = RJust (b ** c ** (isArrow , (dom ** (Refl, isFunc))))
-    _ | RNothing notFunc | _ =
-      RNothing (\(dom :< (x :- b'), cod), (b' ** c' ** (isArrow', (dom ** (Refl, isFunc)))) =>
-        let (eq1, eq2) = isArrowUnique a {b, c, d = b', e = c'} isArrow isArrow' in
-        let isFunc = rewrite eq2 in isFunc in
-        notFunc (dom, cod) isFunc)
-  _ | RNothing notArrow | _ =
-    RNothing (\(dom, cod), (b ** c ** (isArrow, _)) => notArrow (b, c) isArrow)
+reflectIsFunction (bound :< (x :- ())) a with (reflectIsFunction bound a) | (isFunction bound a)
+  _ | RJust isFunc | Just (dom', cod') with (reflectIsArrow cod') | (isArrow cod')
+    _ | RJust isArrow | Just (b, cod) = RJust (dom' ** cod' ** (isFunc , (b ** (isArrow, Refl))))
+    _ | RNothing notArrow | _ =
+      RNothing (\(dom :< (x :- b), cod), (dom ** cod'' ** (isFunc', (b ** (isArrow, Refl)))) =>
+        let (eq1, eq2) = isFunctionUnique bound a {dom1 = dom', dom2 = dom, cod1 = cod', cod2 = cod''} isFunc isFunc' in
+        let isArrow = rewrite eq2 in isArrow in
+        notArrow (b, cod) isArrow)
+  _ | RNothing notFunc | _ =
+    RNothing (\(dom, cod), (dom' ** cod' ** (isFunc, _)) => notFunc (dom', cod') isFunc)
 
 -- Full type checking and synthesis --------------------------------------------
 
 Synths :
-  {tyCtx, tmCtx : Context ()} -> (env : All (const (Ty tyCtx ())) tmCtx) ->
-  SynthTerm tyCtx tmCtx -> Ty tyCtx () -> Type
+  {tmCtx : Context ()} ->
+  (tyEnv : DEnv Ty tyCtx) ->
+  (env : All (const $ Ty [<] ()) tmCtx) ->
+  SynthTerm tyCtx tmCtx -> Ty [<] () -> Type
 Checks :
-  {tyCtx, tmCtx : Context ()} -> (env : All (const (Ty tyCtx ())) tmCtx) ->
-  Ty tyCtx () -> CheckTerm tyCtx tmCtx -> Type
+  {tmCtx : Context ()} ->
+  (tyEnv : DEnv Ty tyCtx) ->
+  (env : All (const $ Ty [<] ()) tmCtx) ->
+  Ty [<] () -> CheckTerm tyCtx tmCtx -> Type
 CheckSpine :
-  {tyCtx, tmCtx : Context ()} -> (env : All (const (Ty tyCtx ())) tmCtx) ->
-  (fun : Ty tyCtx ()) -> List (CheckTerm tyCtx tmCtx) -> (res : Ty tyCtx ()) -> Type
+  {tmCtx : Context ()} ->
+  (tyEnv : DEnv Ty tyCtx) ->
+  (env : All (const $ Ty [<] ()) tmCtx) ->
+  (fun : Ty [<] ()) -> List (CheckTerm tyCtx tmCtx) -> (res : Ty [<] ()) -> Type
 AllCheck :
-  {tyCtx, tmCtx : Context ()} -> (env : All (const (Ty tyCtx ())) tmCtx) ->
-  Row (Ty tyCtx ()) -> Row (CheckTerm tyCtx tmCtx) -> Type
+  {tmCtx : Context ()} ->
+  (tyEnv : DEnv Ty tyCtx) ->
+  (env : All (const $ Ty [<] ()) tmCtx) ->
+  Row (Ty [<] ()) -> Row (CheckTerm tyCtx tmCtx) -> Type
 AllCheckBinding :
-  {tyCtx, tmCtx : Context ()} -> (env : All (const (Ty tyCtx ())) tmCtx) ->
-  Row (Ty tyCtx ()) -> Ty tyCtx () ->
+  {tmCtx : Context ()} ->
+  (tyEnv : DEnv Ty tyCtx) ->
+  (env : All (const $ Ty [<] ()) tmCtx) ->
+  Row (Ty [<] ()) -> Ty [<] () ->
   Row (x : String ** CheckTerm tyCtx (tmCtx :< (x :- ()))) ->
   Type
 
-Synths env (Var i) a = (a = indexAll i env)
-Synths env (Lit k) a = (a = TNat)
-Synths env (Suc t) a = (Checks env TNat t, a = TNat)
-Synths env (App e ts) a =
+Synths tyEnv env (Var i) a = (a = indexAll i env)
+Synths tyEnv env (Lit k) a = (a = TNat)
+Synths tyEnv env Suc a = (a = TArrow TNat TNat)
+Synths tyEnv env (App e ts) a =
   ( fun **
-  ( Synths env e fun
-  , CheckSpine env fun ts a
+  ( Synths tyEnv env e fun
+  , CheckSpine tyEnv env fun ts a
   ))
-Synths env (Prj e x) a =
+Synths tyEnv env (Prj e x) a =
   ( b **
-  ( Synths env e b
+  ( Synths tyEnv env e b
   , ( as **
     ( IsProduct b as
     , GetAt x as a
     ))
   ))
-Synths env (Expand e) a =
+Synths tyEnv env (Expand e) a =
   ( b **
-  ( Synths env e b
+  ( Synths tyEnv env e b
   , ( xc **
     ( IsFixpoint b xc
     , a = sub (Base Id :< (fst xc :- b)) (snd xc)
     ))
   ))
-Synths env (Annot t a) b =
+Synths tyEnv env (Annot t a) b =
   ( Not (IllFormed a)
-  , Checks env a t
-  , a = b
+  , Checks tyEnv env (expand tyEnv a) t
+  , expand tyEnv a = b
   )
 
-Checks env a (Let x e t) =
+Checks tyEnv env a (LetTy x b t) =
+  ( Not (IllFormed b)
+  , Checks (tyEnv :< (x :- b)) env a t
+  )
+Checks tyEnv env a (Let x e t) =
   ( b **
-  ( Synths env e b
-  , Checks (env :< (x :- b)) a t
+  ( Synths tyEnv env e b
+  , Checks tyEnv (env :< (x :- b)) a t
   ))
-Checks env a (Abs bound t) =
+Checks tyEnv env a (Abs bound t) =
   ( as ** b **
   ( IsFunction bound a as b
-  , Checks (env ++ as) b t
+  , Checks tyEnv (env ++ as) b t
   ))
-Checks env a (Inj x t) =
+Checks tyEnv env a (Inj x t) =
   ( as **
   ( IsSum a as
   , ( b **
     ( GetAt x as b
-    , Checks env b t
+    , Checks tyEnv env b t
     ))
   ))
-Checks env a (Tup ts) =
+Checks tyEnv env a (Tup ts) =
   ( as **
   ( IsProduct a as
-  , AllCheck env as ts
+  , AllCheck tyEnv env as ts
   ))
-Checks env a (Case e ts) =
+Checks tyEnv env a (Case e ts) =
   ( b **
-  ( Synths env e b
+  ( Synths tyEnv env e b
   , ( as **
     ( IsSum b as
-    , AllCheckBinding env as a ts
+    , AllCheckBinding tyEnv env as a ts
     ))
   ))
-Checks env a (Contract t) =
+Checks tyEnv env a (Contract t) =
   ( xb **
   ( IsFixpoint a xb
-  , Checks env (sub (Base Id :< (fst xb :- a)) (snd xb)) t
+  , Checks tyEnv env (sub (Base Id :< (fst xb :- a)) (snd xb)) t
   ))
-Checks env a (Fold e x t) =
+Checks tyEnv env a (Fold e x t) =
   ( b **
-  ( Synths env e b
+  ( Synths tyEnv env e b
   , ( yc **
     ( IsFixpoint b yc
-    , Checks (env :< (x :- sub (Base Id :< (fst yc :- a)) (snd yc))) a t
+    , Checks tyEnv (env :< (x :- sub (Base Id :< (fst yc :- a)) (snd yc))) a t
     ))
   ))
-Checks env a (Embed e) =
+Checks tyEnv env a (Embed e) =
   ( b **
-  ( Synths env e b
+  ( Synths tyEnv env e b
   , a `Eq` b
   ))
 
-CheckSpine env fun [] res = fun = res
-CheckSpine env fun (t :: ts) res =
+CheckSpine tyEnv env fun [] res = fun = res
+CheckSpine tyEnv env fun (t :: ts) res =
   ( a ** b **
   ( IsArrow fun a b
-  , Checks env a t
-  , CheckSpine env b ts res
+  , Checks tyEnv env a t
+  , CheckSpine tyEnv env b ts res
   ))
 
-AllCheck env as [<] = (as = [<])
-AllCheck env as (ts :< (x :- t)) =
+AllCheck tyEnv env as [<] = (as = [<])
+AllCheck tyEnv env as (ts :< (x :- t)) =
   ( a ** bs **
   ( Remove x as a bs
-  , Checks env a t
-  , AllCheck env bs ts
+  , Checks tyEnv env a t
+  , AllCheck tyEnv env bs ts
   ))
 
-AllCheckBinding env as a [<] = (as = [<])
-AllCheckBinding env as a (ts :< (x :- (y ** t))) =
+AllCheckBinding tyEnv env as a [<] = (as = [<])
+AllCheckBinding tyEnv env as a (ts :< (x :- (y ** t))) =
   ( b ** bs **
   ( Remove x as b bs
-  , Checks (env :< (y :- b)) a t
-  , AllCheckBinding env bs a ts
+  , Checks tyEnv (env :< (y :- b)) a t
+  , AllCheckBinding tyEnv env bs a ts
   ))
 
 -- Reordering
 
 allCheckReorder :
   as <~> bs -> (ts : Row (CheckTerm tyCtx tmCtx)) ->
-  AllCheck env as ts -> AllCheck env bs ts
+  AllCheck tyEnv env as ts -> AllCheck tyEnv env bs ts
 allCheckReorder [] [<] Refl = Refl
 allCheckReorder (_ :: _) [<] Refl impossible
 allCheckReorder prf (ts :< (x :- t)) (a ** bs ** (prf1, prf2, prf3)) =
@@ -366,7 +383,7 @@ allCheckReorder prf (ts :< (x :- t)) (a ** bs ** (prf1, prf2, prf3)) =
 
 allCheckBindingReorder :
   as <~> bs -> (ts : Row (x ** CheckTerm tyCtx (tmCtx :< (x :- ())))) ->
-  AllCheckBinding env as a ts -> AllCheckBinding env bs a ts
+  AllCheckBinding tyEnv env as a ts -> AllCheckBinding tyEnv env bs a ts
 allCheckBindingReorder [] [<] Refl = Refl
 allCheckBindingReorder (_ :: _) [<] Refl impossible
 allCheckBindingReorder prf (ts :< (x :- (y ** t))) (b ** bs ** (prf1, prf2, prf3)) =
@@ -375,139 +392,153 @@ allCheckBindingReorder prf (ts :< (x :- (y ** t))) (b ** bs ** (prf1, prf2, prf3
 -- Uniqueness
 
 synthsUnique :
-  (0 env : All (const $ Ty tyCtx ()) tmCtx) -> (e : SynthTerm tyCtx tmCtx) ->
-  Synths env e a -> Synths env e b -> a = b
+  (0 tyEnv : DEnv Ty tyCtx) ->
+  (0 env : All (const $ Ty [<] ()) tmCtx) ->
+  (e : SynthTerm tyCtx tmCtx) ->
+  Synths tyEnv env e a -> Synths tyEnv env e b -> a = b
 checkSpineUnique :
-  (0 env : All (const $ Ty tyCtx ()) tmCtx) ->
-  (fun : Ty tyCtx ()) -> (ts : List (CheckTerm tyCtx tmCtx)) ->
-  CheckSpine env fun ts a -> CheckSpine env fun ts b -> a = b
+  (0 tyEnv : DEnv Ty tyCtx) ->
+  (0 env : All (const $ Ty [<] ()) tmCtx) ->
+  (fun : Ty [<] ()) -> (ts : List (CheckTerm tyCtx tmCtx)) ->
+  CheckSpine tyEnv env fun ts a -> CheckSpine tyEnv env fun ts b -> a = b
 
-synthsUnique env (Var i) prf1 prf2 = trans prf1 (sym prf2)
-synthsUnique env (Lit k) prf1 prf2 = trans prf1 (sym prf2)
-synthsUnique env (Suc t) (_, prf1) (_, prf2) = trans prf1 (sym prf2)
-synthsUnique env (App e ts) (fun1 ** (prf11, prf12)) (fun2 ** (prf21, prf22))
-  with (synthsUnique env e prf11 prf21)
-  synthsUnique env (App e ts) (fun ** (prf11, prf12)) (fun ** (prf21, prf22)) | Refl =
-    checkSpineUnique env fun ts prf12 prf22
-synthsUnique env (Prj e k) (a ** (prf11, prf12)) (b ** (prf21, prf22))
-  with (synthsUnique env e prf11 prf21)
-  synthsUnique env (Prj e k) (a ** (_, (as ** (prf11, prf12)))) (a ** (_, (bs ** (prf21, prf22)))) | Refl
+synthsUnique tyEnv env (Var i) prf1 prf2 = trans prf1 (sym prf2)
+synthsUnique tyEnv env (Lit k) prf1 prf2 = trans prf1 (sym prf2)
+synthsUnique tyEnv env Suc prf1 prf2 = trans prf1 (sym prf2)
+synthsUnique tyEnv env (App e ts) (fun1 ** (prf11, prf12)) (fun2 ** (prf21, prf22))
+  with (synthsUnique tyEnv env e prf11 prf21)
+  synthsUnique tyEnv env (App e ts) (fun ** (prf11, prf12)) (fun ** (prf21, prf22)) | Refl =
+    checkSpineUnique tyEnv env fun ts prf12 prf22
+synthsUnique tyEnv env (Prj e k) (a ** (prf11, prf12)) (b ** (prf21, prf22))
+  with (synthsUnique tyEnv env e prf11 prf21)
+  synthsUnique tyEnv env (Prj e k) (a ** (_, (as ** (prf11, prf12)))) (a ** (_, (bs ** (prf21, prf22)))) | Refl
     with (isProductUnique a prf11 prf21)
-    synthsUnique env (Prj e k) (a ** (_, (as ** (_, prf1)))) (a ** (_, (as ** (_, prf2)))) | Refl | Refl =
+    synthsUnique tyEnv env (Prj e k) (a ** (_, (as ** (_, prf1)))) (a ** (_, (as ** (_, prf2)))) | Refl | Refl =
       getAtUnique k as prf1 prf2
-synthsUnique env (Expand e) (a ** (prf11, prf12)) (b ** (prf21, prf22))
-  with (synthsUnique env e prf11 prf21)
-  synthsUnique env (Expand e) (a ** (_, (b ** (prf11, prf12)))) (a ** (_, (c ** (prf21, prf22)))) | Refl
+synthsUnique tyEnv env (Expand e) (a ** (prf11, prf12)) (b ** (prf21, prf22))
+  with (synthsUnique tyEnv env e prf11 prf21)
+  synthsUnique tyEnv env (Expand e) (a ** (_, (b ** (prf11, prf12)))) (a ** (_, (c ** (prf21, prf22)))) | Refl
     with (isFixpointUnique a prf11 prf21)
-    synthsUnique env (Expand e) (a ** (_, (b ** (_, prf1)))) (a ** (_, (b ** (_, prf2)))) | Refl | Refl =
+    synthsUnique tyEnv env (Expand e) (a ** (_, (b ** (_, prf1)))) (a ** (_, (b ** (_, prf2)))) | Refl | Refl =
       trans prf1 (sym prf2)
-synthsUnique env (Annot t c) prf1 prf2 = trans (sym $ snd $ snd prf1) (snd $ snd prf2)
+synthsUnique tyEnv env (Annot t c) prf1 prf2 = trans (sym $ snd $ snd prf1) (snd $ snd prf2)
 
-checkSpineUnique env fun [] prf1 prf2 = trans (sym prf1) prf2
-checkSpineUnique env fun (t :: ts) (a ** b ** (prf11, _ , prf12)) (c ** d ** (prf21, _ , prf22))
+checkSpineUnique tyEnv env fun [] prf1 prf2 = trans (sym prf1) prf2
+checkSpineUnique tyEnv env fun (t :: ts) (a ** b ** (prf11, _ , prf12)) (c ** d ** (prf21, _ , prf22))
   with (isArrowUnique fun prf11 prf21)
-  checkSpineUnique env fun (t :: ts) (a ** b ** (_, _ , prf1)) (a ** b ** (_, _ , prf2)) | (Refl, Refl) =
-    checkSpineUnique env b ts prf1 prf2
+  checkSpineUnique tyEnv env fun (t :: ts) (a ** b ** (_, _ , prf1)) (a ** b ** (_, _ , prf2)) | (Refl, Refl) =
+    checkSpineUnique tyEnv env b ts prf1 prf2
 
 -- Decision
 
 synths :
-  (env : All (const (Ty tyCtx ())) tmCtx) ->
-  SynthTerm tyCtx tmCtx -> Maybe (Ty tyCtx ())
+  (tyEnv : DEnv Ty tyCtx) ->
+  (env : All (const $ Ty [<] ()) tmCtx) ->
+  SynthTerm tyCtx tmCtx -> Maybe (Ty [<] ())
+export
 checks :
-  (env : All (const (Ty tyCtx ())) tmCtx) ->
-  Ty tyCtx () -> CheckTerm tyCtx tmCtx -> Bool
+  (tyEnv : DEnv Ty tyCtx) ->
+  (env : All (const $ Ty [<] ()) tmCtx) ->
+  Ty [<] () -> CheckTerm tyCtx tmCtx -> Bool
 checkSpine :
-  (env : All (const (Ty tyCtx ())) tmCtx) ->
-  (fun : Ty tyCtx ()) -> List (CheckTerm tyCtx tmCtx) -> Maybe (Ty tyCtx ())
+  (tyEnv : DEnv Ty tyCtx) ->
+  (env : All (const $ Ty [<] ()) tmCtx) ->
+  (fun : Ty [<] ()) -> List (CheckTerm tyCtx tmCtx) -> Maybe (Ty [<] ())
 allCheck :
-  (env : All (const (Ty tyCtx ())) tmCtx) ->
-  Row (Ty tyCtx ()) -> Row (CheckTerm tyCtx tmCtx) -> Bool
+  (tyEnv : DEnv Ty tyCtx) ->
+  (env : All (const $ Ty [<] ()) tmCtx) ->
+  Row (Ty [<] ()) -> Row (CheckTerm tyCtx tmCtx) -> Bool
 allCheckBinding :
-  (env : All (const (Ty tyCtx ())) tmCtx) ->
-  Row (Ty tyCtx ()) -> Ty tyCtx () ->
+  (tyEnv : DEnv Ty tyCtx) ->
+  (env : All (const $ Ty [<] ()) tmCtx) ->
+  Row (Ty [<] ()) -> Ty [<] () ->
   Row (x ** CheckTerm tyCtx (tmCtx :< (x :- ()))) ->
   Bool
 
-synths env (Var i) = Just (indexAll i env)
-synths env (Lit k) = Just TNat
-synths env (Suc t) = do
-  guard (checks env TNat t)
-  Just TNat
-synths env (App e ts) = do
-  a <- synths env e
-  checkSpine env a ts
-synths env (Prj e k) = do
-  a <- synths env e
+synths tyEnv env (Var i) = do
+  pure (indexAll i env)
+synths tyEnv env (Lit k) = do
+  pure TNat
+synths tyEnv env Suc = do
+  pure (TArrow TNat TNat)
+synths tyEnv env (App e ts) = do
+  a <- synths tyEnv env e
+  checkSpine tyEnv env a ts
+synths tyEnv env (Prj e k) = do
+  a <- synths tyEnv env e
   as <- isProduct a
   getAt k as
-synths env (Expand e) = do
-  a <- synths env e
+synths tyEnv env (Expand e) = do
+  a <- synths tyEnv env e
   (x ** b) <- isFixpoint a
   Just (sub (Base Id :< (x :- a)) b)
-synths env (Annot t a) = do
+synths tyEnv env (Annot t a) = do
   guard (not $ illFormed a)
-  guard (checks env a t)
-  Just a
+  guard (checks tyEnv env (expand tyEnv a) t)
+  Just (expand tyEnv a)
 
-checks env a (Let x e t) =
-  case synths env e of
-    Just b => checks (env :< (x :- b)) a t
+checks tyEnv env a (LetTy x b t) =
+  not (illFormed b) &&
+  checks (tyEnv :< (x :- b)) env a t
+checks tyEnv env a (Let x e t) =
+  case synths tyEnv env e of
+    Just b => checks tyEnv (env :< (x :- b)) a t
     Nothing => False
-checks env a (Abs bound t) =
+checks tyEnv env a (Abs bound t) =
   case isFunction bound a of
-    Just (dom, cod) => checks (env ++ dom) cod t
+    Just (dom, cod) => checks tyEnv (env ++ dom) cod t
     Nothing => False
-checks env a (Inj k t) =
+checks tyEnv env a (Inj k t) =
   case isSum a of
     Just as =>
       case getAt k as of
-        Just b => checks env b t
+        Just b => checks tyEnv env b t
         Nothing => False
     Nothing => False
-checks env a (Tup ts) =
+checks tyEnv env a (Tup ts) =
   case isProduct a of
-    Just as => allCheck env as ts
+    Just as => allCheck tyEnv env as ts
     Nothing => False
-checks env a (Case e ts) =
-  case synths env e of
+checks tyEnv env a (Case e ts) =
+  case synths tyEnv env e of
     Just b =>
       case isSum b of
-        Just as => allCheckBinding env as a ts
+        Just as => allCheckBinding tyEnv env as a ts
         Nothing => False
     Nothing => False
-checks env a (Contract t) =
+checks tyEnv env a (Contract t) =
   case isFixpoint a of
-    Just (x ** b) => checks env (sub (Base Id :< (x :- a)) b) t
+    Just (x ** b) => checks tyEnv env (sub (Base Id :< (x :- a)) b) t
     Nothing => False
-checks env a (Fold e x t) =
-  case synths env e of
+checks tyEnv env a (Fold e x t) =
+  case synths tyEnv env e of
     Just b =>
       case isFixpoint b of
-        Just (y ** c) => checks (env :< (x :- sub (Base Id :< (y :- a)) c)) a t
+        Just (y ** c) => checks tyEnv (env :< (x :- sub (Base Id :< (y :- a)) c)) a t
         Nothing => False
     Nothing => False
-checks env a (Embed e) =
-  case synths env e of
+checks tyEnv env a (Embed e) =
+  case synths tyEnv env e of
     Just b => a == b
     Nothing => False
 
-checkSpine env a [] = Just a
-checkSpine env a (t :: ts) = do
+checkSpine tyEnv env a [] = do
+  pure a
+checkSpine tyEnv env a (t :: ts) = do
   (dom, cod) <- isArrow a
-  guard (checks env dom t)
-  checkSpine env cod ts
+  guard (checks tyEnv env dom t)
+  checkSpine tyEnv env cod ts
 
-allCheck env as [<] = null as
-allCheck env as (ts :< (x :- t)) =
+allCheck tyEnv env as [<] = null as
+allCheck tyEnv env as (ts :< (x :- t)) =
   case remove' x as of
-    Just (a, bs) => checks env a t && allCheck env bs ts
+    Just (a, bs) => checks tyEnv env a t && allCheck tyEnv env bs ts
     Nothing => False
 
-allCheckBinding env as a [<] = null as
-allCheckBinding env as a (ts :< (x :- (y ** t))) =
+allCheckBinding tyEnv env as a [<] = null as
+allCheckBinding tyEnv env as a (ts :< (x :- (y ** t))) =
   case remove' x as of
-    Just (b, bs) => checks (env :< (y :- b)) a t && allCheckBinding env bs a ts
+    Just (b, bs) => checks tyEnv (env :< (y :- b)) a t && allCheckBinding tyEnv env bs a ts
     Nothing => False
 
 -- Proof
@@ -516,84 +547,92 @@ allCheckBinding env as a (ts :< (x :- (y ** t))) =
 
 partial
 0 reflectSynths :
-  (env : All (const $ Ty tyCtx ()) tmCtx) ->
+  (tyEnv : DEnv Ty tyCtx) ->
+  (env : All (const $ Ty [<] ()) tmCtx) ->
   (e : SynthTerm tyCtx tmCtx) ->
-  Synths env e `OnlyWhen` synths env e
+  Synths tyEnv env e `OnlyWhen` synths tyEnv env e
 partial
 0 reflectChecks :
-  (env : All (const $ Ty tyCtx ()) tmCtx) ->
-  (a : Ty tyCtx ()) -> (t : CheckTerm tyCtx tmCtx) ->
-  Checks env a t `Reflects` checks env a t
+  (tyEnv : DEnv Ty tyCtx) ->
+  (env : All (const $ Ty [<] ()) tmCtx) ->
+  (a : Ty [<] ()) -> (t : CheckTerm tyCtx tmCtx) ->
+  Checks tyEnv env a t `Reflects` checks tyEnv env a t
 partial
 0 reflectCheckSpine :
-  (env : All (const $ Ty tyCtx ()) tmCtx) ->
-  (fun : Ty tyCtx ()) -> (ts : List (CheckTerm tyCtx tmCtx)) ->
-  CheckSpine env fun ts `OnlyWhen` checkSpine env fun ts
+  (tyEnv : DEnv Ty tyCtx) ->
+  (env : All (const $ Ty [<] ()) tmCtx) ->
+  (fun : Ty [<] ()) -> (ts : List (CheckTerm tyCtx tmCtx)) ->
+  CheckSpine tyEnv env fun ts `OnlyWhen` checkSpine tyEnv env fun ts
 partial
 0 reflectAllCheck :
-  (env : All (const $ Ty tyCtx ()) tmCtx) ->
-  (as : Row (Ty tyCtx ())) -> (ts : Row (CheckTerm tyCtx tmCtx)) ->
-  AllCheck env as ts `Reflects` allCheck env as ts
+  (tyEnv : DEnv Ty tyCtx) ->
+  (env : All (const $ Ty [<] ()) tmCtx) ->
+  (as : Row (Ty [<] ())) -> (ts : Row (CheckTerm tyCtx tmCtx)) ->
+  AllCheck tyEnv env as ts `Reflects` allCheck tyEnv env as ts
 partial
 0 reflectAllCheckBinding :
-  (env : All (const $ Ty tyCtx ()) tmCtx) ->
-  (as : Row (Ty tyCtx ())) -> (a : Ty tyCtx ()) ->
+  (tyEnv : DEnv Ty tyCtx) ->
+  (env : All (const $ Ty [<] ()) tmCtx) ->
+  (as : Row (Ty [<] ())) -> (a : Ty [<] ()) ->
   (ts : Row (x ** CheckTerm tyCtx (tmCtx :< (x :- ())))) ->
-  AllCheckBinding env as a ts `Reflects` allCheckBinding env as a ts
+  AllCheckBinding tyEnv env as a ts `Reflects` allCheckBinding tyEnv env as a ts
 
-reflectSynths env (Var i) = RJust Refl
-reflectSynths env (Lit k) = RJust Refl
-reflectSynths env (Suc t) with (reflectChecks env TNat t) | (checks env TNat t)
-  _ | RTrue tNat | _ = RJust (tNat, Refl)
-  _ | RFalse tNotNat | _ = RNothing (\_, (tNat, _) => tNotNat tNat)
-reflectSynths env (App e ts) with (reflectSynths env e) | (synths env e)
-  _ | RJust eTy | Just a with (reflectCheckSpine env a ts) | (checkSpine env a ts)
+reflectSynths tyEnv env (Var i) = RJust Refl
+reflectSynths tyEnv env (Lit k) = RJust Refl
+reflectSynths tyEnv env Suc = RJust Refl
+reflectSynths tyEnv env (App e ts) with (reflectSynths tyEnv env e) | (synths tyEnv env e)
+  _ | RJust eTy | Just a with (reflectCheckSpine tyEnv env a ts) | (checkSpine tyEnv env a ts)
     _ | RJust tsSpine | Just b = RJust (a ** (eTy, tsSpine))
     _ | RNothing tsBad | _ =
       RNothing
         (\c, (b ** (eTy', tsSpine)) =>
-          let tsSpine = rewrite synthsUnique env e {a, b} eTy eTy' in tsSpine in
+          let tsSpine = rewrite synthsUnique tyEnv env e {a, b} eTy eTy' in tsSpine in
           tsBad c tsSpine)
   _ | RNothing eBad | _ =
     RNothing (\c, (b ** (eTy, _)) => eBad b eTy)
-reflectSynths env (Prj e x) with (reflectSynths env e) | (synths env e)
+reflectSynths tyEnv env (Prj e x) with (reflectSynths tyEnv env e) | (synths tyEnv env e)
   _ | RJust eTy | Just a with (reflectIsProduct a) | (isProduct a)
     _ | RJust prf | Just as with (reflectGetAt x as) | (getAt x as)
       _ | RJust got | Just b = RJust (a ** (eTy, (as ** (prf, got))))
       _ | RNothing not | _ =
         RNothing (\x, (a' ** (eTy', (as' ** (prf', got)))) =>
-          let prf' = rewrite synthsUnique env e {a, b = a'} eTy eTy' in prf' in
+          let prf' = rewrite synthsUnique tyEnv env e {a, b = a'} eTy eTy' in prf' in
           let got = rewrite isProductUnique a {as, bs = as'} prf prf' in got in
           not x got)
     _ | RNothing nprf | _ =
       RNothing (\x, (a' ** (eTy', (as' ** (prf, _)))) =>
-        let prf = rewrite synthsUnique env e {a, b = a'} eTy eTy' in prf in
+        let prf = rewrite synthsUnique tyEnv env e {a, b = a'} eTy eTy' in prf in
         nprf as' prf)
   _ | RNothing eBad | _ = RNothing (\x, (a' ** (eTy, _)) => eBad a' eTy)
-reflectSynths env (Expand e) with (reflectSynths env e) | (synths env e)
+reflectSynths tyEnv env (Expand e) with (reflectSynths tyEnv env e) | (synths tyEnv env e)
   _ | RJust eTy | Just a with (reflectIsFixpoint a) | (isFixpoint a)
     _ | RJust prf | Just (x ** b) = RJust (a ** (eTy, ((x ** b) ** (prf, Refl))))
     _ | RNothing nprf | _ =
       RNothing (\x, (a' ** (eTy', (b ** (prf, eq)))) =>
-        let prf = rewrite synthsUnique env e {a, b = a'} eTy eTy' in prf in
+        let prf = rewrite synthsUnique tyEnv env e {a, b = a'} eTy eTy' in prf in
         nprf b prf)
   _ | RNothing eBad | _ = RNothing (\x, (a ** (eTy, _)) => eBad a eTy)
-reflectSynths env (Annot t a) with (reflectIllFormed a) | (illFormed a)
-  _ | RFalse wf | _ with (reflectChecks env a t) | (checks env a t)
+reflectSynths tyEnv env (Annot t a) with (reflectIllFormed a) | (illFormed a)
+  _ | RFalse wf | _ with (reflectChecks tyEnv env (expand tyEnv a) t) | (checks tyEnv env (expand tyEnv a) t)
     _ | RTrue tTy | _ = RJust (wf, tTy, Refl)
     _ | RFalse tBad | _ = RNothing (\x, (_, tTy, Refl) => tBad tTy)
   _ | RTrue notWf | _ = RNothing (\x, (wf, _) => wf notWf)
 
-reflectChecks env a (Let x e t) with (reflectSynths env e) | (synths env e)
-  _ | RJust eTy | Just b with (reflectChecks (env :< (x :- b)) a t) | (checks (env :< (x :- b)) a t)
+reflectChecks tyEnv env a (LetTy x b t) with (reflectIllFormed b) | (illFormed b)
+  _ | RFalse wf | _ with (reflectChecks (tyEnv :< (x :- b)) env a t) | (checks (tyEnv :< (x :- b)) env a t)
+    _ | RTrue tTy | _ = RTrue (wf, tTy)
+    _ | RFalse tBad | _ = RFalse (tBad . snd)
+  _ | RTrue notWf | _ = RFalse (\(wf, _) => wf notWf)
+reflectChecks tyEnv env a (Let x e t) with (reflectSynths tyEnv env e) | (synths tyEnv env e)
+  _ | RJust eTy | Just b with (reflectChecks tyEnv (env :< (x :- b)) a t) | (checks tyEnv (env :< (x :- b)) a t)
     _ | RTrue tTy | _ = RTrue (b ** (eTy, tTy))
     _ | RFalse tBad | _ =
       RFalse (\(b' ** (eTy', tTy)) =>
-        let tTy = rewrite synthsUnique env e {a = b, b = b'} eTy eTy' in tTy in
+        let tTy = rewrite synthsUnique tyEnv env e {a = b, b = b'} eTy eTy' in tTy in
         tBad tTy)
   _ | RNothing eBad | Nothing = RFalse (\(b ** (eTy, _)) => eBad b eTy)
-reflectChecks env a (Abs bound t) with (reflectIsFunction bound a) | (isFunction bound a)
-  _ | RJust prf | Just (as, b) with (reflectChecks (env ++ as) b t) | (checks (env ++ as) b t)
+reflectChecks tyEnv env a (Abs bound t) with (reflectIsFunction bound a) | (isFunction bound a)
+  _ | RJust prf | Just (as, b) with (reflectChecks tyEnv (env ++ as) b t) | (checks tyEnv (env ++ as) b t)
     _ | RTrue tTy | _ = RTrue (as ** b ** (prf, tTy))
     _ | RFalse tBad | _ =
       RFalse (\(as' ** b' ** (prf', tTy)) =>
@@ -606,9 +645,9 @@ reflectChecks env a (Abs bound t) with (reflectIsFunction bound a) | (isFunction
         in
         tBad tTy)
   _ | RNothing nprf | _ = RFalse (\(as ** b ** (prf, _)) => nprf (as, b) prf)
-reflectChecks env a (Inj k t) with (reflectIsSum a) | (isSum a)
+reflectChecks tyEnv env a (Inj k t) with (reflectIsSum a) | (isSum a)
   _ | RJust prf | Just as with (reflectGetAt k as) | (getAt k as)
-    _ | RJust got | Just b with (reflectChecks env b t) | (checks env b t)
+    _ | RJust got | Just b with (reflectChecks tyEnv env b t) | (checks tyEnv env b t)
       _ | RTrue tTy | _ = RTrue (as ** (prf, (b ** (got, tTy))))
       _ | RFalse tBad | _ =
         RFalse (\(as' ** (prf', (b' ** (got', tTy)))) =>
@@ -621,74 +660,74 @@ reflectChecks env a (Inj k t) with (reflectIsSum a) | (isSum a)
         let got = rewrite isSumUnique a {as, bs = as'} prf prf' in got in
         not b got)
   _ | RNothing nprf | _ = RFalse (\(as ** (prf, _)) => nprf as prf)
-reflectChecks env a (Tup ts) with (reflectIsProduct a) | (isProduct a)
-  _ | RJust prf | Just as with (reflectAllCheck env as ts) | (allCheck env as ts)
+reflectChecks tyEnv env a (Tup ts) with (reflectIsProduct a) | (isProduct a)
+  _ | RJust prf | Just as with (reflectAllCheck tyEnv env as ts) | (allCheck tyEnv env as ts)
     _ | RTrue tsTy | _ = RTrue (as ** (prf, tsTy))
     _ | RFalse tsBad | _ =
       RFalse (\(as' ** (prf', tsTy)) =>
         let tsTy = rewrite isProductUnique a {as, bs = as'} prf prf' in tsTy in
         tsBad tsTy)
   _ | RNothing nprf | _ = RFalse (\(as ** (prf, _)) => nprf as prf)
-reflectChecks env a (Case e ts) with (reflectSynths env e) | (synths env e)
+reflectChecks tyEnv env a (Case e ts) with (reflectSynths tyEnv env e) | (synths tyEnv env e)
   _ | RJust eTy | Just b with (reflectIsSum b) | (isSum b)
-    _ | RJust prf | Just as with (reflectAllCheckBinding env as a ts) | (allCheckBinding env as a ts)
+    _ | RJust prf | Just as with (reflectAllCheckBinding tyEnv env as a ts) | (allCheckBinding tyEnv env as a ts)
       _ | RTrue tsTy | _ = RTrue (b ** (eTy, (as ** (prf, tsTy))))
       _ | RFalse tsBad | _ =
         RFalse
           (\(b' ** (eTy', (as' ** (prf', tsTy)))) =>
-            let prf' = rewrite synthsUnique env e {a = b, b = b'} eTy eTy' in prf' in
+            let prf' = rewrite synthsUnique tyEnv env e {a = b, b = b'} eTy eTy' in prf' in
             let tsTy = rewrite isSumUnique b {as, bs = as'} prf prf' in tsTy in
             tsBad tsTy)
     _ | RNothing nprf | _ =
       RFalse (\(b' ** (eTy', (as ** (prf, _)))) =>
-        let prf = rewrite synthsUnique env e {a = b, b = b'} eTy eTy' in prf in
+        let prf = rewrite synthsUnique tyEnv env e {a = b, b = b'} eTy eTy' in prf in
         nprf as prf)
   _ | RNothing eBad | _ = RFalse (\(b ** (eTy, _)) => eBad b eTy)
-reflectChecks env a (Contract t) with (reflectIsFixpoint a) | (isFixpoint a)
-  _ | RJust prf | Just (x ** b) with (reflectChecks env (sub (Base Id :< (x :- a)) b) t) | (checks env (sub (Base Id :< (x :- a)) b) t)
+reflectChecks tyEnv env a (Contract t) with (reflectIsFixpoint a) | (isFixpoint a)
+  _ | RJust prf | Just (x ** b) with (reflectChecks tyEnv env (sub (Base Id :< (x :- a)) b) t) | (checks tyEnv env (sub (Base Id :< (x :- a)) b) t)
     _ | RTrue tTy | _ = RTrue ((x ** b) ** (prf, tTy))
     _ | RFalse tBad | _ =
       RFalse (\(b' ** (prf', tTy)) =>
         let
           eq = isFixpointUnique a {xb = (x ** b), yc = b'} prf prf'
           tTy =
-            replace {p = \xb => Checks env (sub (Base Id :< (xb.fst :- a)) xb.snd) t}
+            replace {p = \xb => Checks tyEnv env (sub (Base Id :< (xb.fst :- a)) xb.snd) t}
               (sym eq) tTy
         in
         tBad tTy)
   _ | RNothing nprf | _ = RFalse (\(b ** (prf, _)) => nprf b prf)
-reflectChecks env a (Fold e x t) with (reflectSynths env e) | (synths env e)
+reflectChecks tyEnv env a (Fold e x t) with (reflectSynths tyEnv env e) | (synths tyEnv env e)
   _ | RJust eTy | Just b with (reflectIsFixpoint b) | (isFixpoint b)
-    _ | RJust prf | Just (y ** c) with (reflectChecks (env :< (x :- sub (Base Id :< (y :- a)) c)) a t) | (checks (env :< (x :- sub (Base Id :< (y :- a)) c)) a t)
+    _ | RJust prf | Just (y ** c) with (reflectChecks tyEnv (env :< (x :- sub (Base Id :< (y :- a)) c)) a t) | (checks tyEnv (env :< (x :- sub (Base Id :< (y :- a)) c)) a t)
       _ | RTrue tTy | _ = RTrue (b ** (eTy, ((y ** c) ** (prf, tTy))))
       _ | RFalse tBad | _ =
         RFalse (\(b' ** (eTy', (c' ** (prf', tTy)))) =>
           let
-            prf' = rewrite synthsUnique env e {a = b, b = b'} eTy eTy' in prf'
+            prf' = rewrite synthsUnique tyEnv env e {a = b, b = b'} eTy eTy' in prf'
             eq = isFixpointUnique b {xb = (y ** c), yc = c'} prf prf'
             tTy =
-              replace {p = \yc => Checks (env :< (x :- sub (Base Id :< (yc.fst :- a)) yc.snd)) a t}
+              replace {p = \yc => Checks tyEnv (env :< (x :- sub (Base Id :< (yc.fst :- a)) yc.snd)) a t}
                 (sym eq) tTy
           in
           tBad tTy)
     _ | RNothing nprf | _ =
       RFalse (\(b' ** (eTy', (c ** (prf, _)))) =>
-        let prf = rewrite synthsUnique env e {a = b, b = b'} eTy eTy' in prf in
+        let prf = rewrite synthsUnique tyEnv env e {a = b, b = b'} eTy eTy' in prf in
         nprf c prf)
   _ | RNothing eBad | _ = RFalse (\(b ** (eTy, _)) => eBad b eTy)
-reflectChecks env a (Embed e) with (reflectSynths env e) | (synths env e)
+reflectChecks tyEnv env a (Embed e) with (reflectSynths tyEnv env e) | (synths tyEnv env e)
   _ | RJust eTy | Just b with (reflectEq a b) | (a == b)
     _ | RTrue eq | _ = RTrue (b ** (eTy, eq))
     _ | RFalse neq | _ =
       RFalse (\(b' ** (eTy', eq)) =>
-        let eq = rewrite synthsUnique env e {a = b, b = b'} eTy eTy' in eq in
+        let eq = rewrite synthsUnique tyEnv env e {a = b, b = b'} eTy eTy' in eq in
         neq eq)
   _ | RNothing eBad | _ = RFalse (\(b ** (eTy, _)) => eBad b eTy)
 
-reflectCheckSpine env a [] = RJust Refl
-reflectCheckSpine env a (t :: ts) with (reflectIsArrow a) | (isArrow a)
-  _ | RJust prf | Just (b, c) with (reflectChecks env b t) | (checks env b t)
-    _ | RTrue tTy | _ with (reflectCheckSpine env c ts) | (checkSpine env c ts)
+reflectCheckSpine tyEnv env a [] = RJust Refl
+reflectCheckSpine tyEnv env a (t :: ts) with (reflectIsArrow a) | (isArrow a)
+  _ | RJust prf | Just (b, c) with (reflectChecks tyEnv env b t) | (checks tyEnv env b t)
+    _ | RTrue tTy | _ with (reflectCheckSpine tyEnv env c ts) | (checkSpine tyEnv env c ts)
       _ | RJust tsTy | Just d = RJust (b ** c ** (prf, tTy, tsTy))
       _ | RNothing tsBad | _ =
         RNothing (\d, (_ ** c' ** (prf', _, tsTy)) =>
@@ -702,10 +741,10 @@ reflectCheckSpine env a (t :: ts) with (reflectIsArrow a) | (isArrow a)
         tBad tTy)
   _ | RNothing nprf | _ = RNothing (\d, (b ** c ** (prf, _)) => nprf (b, c) prf)
 
-reflectAllCheck env [<] [<] = RTrue Refl
-reflectAllCheck env (_ :< _) [<] = RFalse (\case Refl impossible)
-reflectAllCheck env as (ts :< (x :- t)) with (reflectRemove x as) | (remove' x as)
-  _ | RJust prf | Just (a, bs) with (reflectAnd (reflectChecks env a t) (reflectAllCheck env bs ts)) | (checks env a t && allCheck env bs ts)
+reflectAllCheck tyEnv env [<] [<] = RTrue Refl
+reflectAllCheck tyEnv env (_ :< _) [<] = RFalse (\case Refl impossible)
+reflectAllCheck tyEnv env as (ts :< (x :- t)) with (reflectRemove x as) | (remove' x as)
+  _ | RJust prf | Just (a, bs) with (reflectAnd (reflectChecks tyEnv env a t) (reflectAllCheck tyEnv env bs ts)) | (checks tyEnv env a t && allCheck tyEnv env bs ts)
     _ | RTrue checks | _ = RTrue (a ** bs ** (prf, checks))
     _ | RFalse notChecks | _ =
       RFalse (\(a' ** bs' ** (prf', checks)) =>
@@ -714,10 +753,10 @@ reflectAllCheck env as (ts :< (x :- t)) with (reflectRemove x as) | (remove' x a
         bimap (\x => rewrite eq in x) (allCheckReorder (sym reorder) ts) checks)
   _ | RNothing nprf | _ = RFalse (\(a ** bs ** (prf, _)) => nprf (a, bs) prf)
 
-reflectAllCheckBinding env [<] a [<] = RTrue Refl
-reflectAllCheckBinding env (_ :< _) a [<] = RFalse (\case Refl impossible)
-reflectAllCheckBinding env as a (ts :< (x :- (y ** t))) with (reflectRemove x as) | (remove' x as)
-  _ | RJust prf | Just (b, bs) with (reflectAnd (reflectChecks (env :< (y :- b)) a t) (reflectAllCheckBinding env bs a ts)) | (checks (env :< (y :- b)) a t && allCheckBinding env bs a ts)
+reflectAllCheckBinding tyEnv env [<] a [<] = RTrue Refl
+reflectAllCheckBinding tyEnv env (_ :< _) a [<] = RFalse (\case Refl impossible)
+reflectAllCheckBinding tyEnv env as a (ts :< (x :- (y ** t))) with (reflectRemove x as) | (remove' x as)
+  _ | RJust prf | Just (b, bs) with (reflectAnd (reflectChecks tyEnv (env :< (y :- b)) a t) (reflectAllCheckBinding tyEnv env bs a ts)) | (checks tyEnv (env :< (y :- b)) a t && allCheckBinding tyEnv env bs a ts)
     _ | RTrue checks | _ = RTrue (b ** bs ** (prf, checks))
     _ | RFalse notChecks | _ =
       RFalse (\(b' ** bs' ** (prf', checks)) =>

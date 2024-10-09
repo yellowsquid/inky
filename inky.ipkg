@@ -4,7 +4,7 @@ sourcedir = "src"
 
 options = "--total"
 
-depends = contrib
+depends = collie, contrib
 
 executable = inky
 main = Inky

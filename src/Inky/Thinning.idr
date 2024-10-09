@@ -2,9 +2,10 @@ module Inky.Thinning
 
 import public Inky.Context
 
+import Control.Function
+import Control.WellFounded
 import Data.DPair
 import Data.Nat
-import Control.Function
 
 --------------------------------------------------------------------------------
 -- Thinnings -------------------------------------------------------------------
@@ -252,3 +253,58 @@ lookupLift :
   (f : ctx2 `Thins` ctx3) -> (env : Env ctx1 ctx2 (t ctx2)) -> (i : Var ctx1 v) ->
   lookup (lift f env) i = bimap (index f) (rename f) (lookup env i)
 lookupLift f env i = lookupPosLift f env i.pos
+
+-- Well Founded ----------------------------------------------------------------
+
+export
+Sized (Context a) where
+  size [<] = 0
+  size (ctx :< x) = S (size ctx)
+
+-- Environments ------------------------------------------------------
+
+namespace DEnv
+  public export
+  data DEnv : (0 p : Context a -> a -> Type) -> Context a -> Type where
+    Lin : DEnv p [<]
+    (:<) :
+      DEnv p ctx -> (px : Assoc0 (p ctx x.value)) ->
+      {auto 0 prf : px.name = x.name} ->
+      DEnv p (ctx :< x)
+
+  %name DEnv.DEnv env
+
+  export
+  length : DEnv p ctx -> Length ctx
+  length [<] = Z
+  length (env :< px) = S (length env)
+
+  public export
+  record Entry (p : Context a -> a -> Type) (ctx : Context a) (v : a) where
+    constructor MkEntry
+    {0 support : Context a}
+    0 prf : support `Smaller` ctx
+    thins : support `Thins` ctx
+    value : p support v
+
+  export
+  indexDEnvPos : VarPos ctx x v -> DEnv p ctx -> Entry p ctx v
+  indexDEnvPos Here (env :< px) = MkEntry reflexive (Drop Id) px.value
+  indexDEnvPos (There pos) (env :< px) =
+    let MkEntry prf thins value = indexDEnvPos pos env in
+    MkEntry (lteSuccRight prf) (Drop thins) value
+
+  export
+  indexDEnv' : Var ctx v -> DEnv p ctx -> Entry p ctx v
+  indexDEnv' i env = indexDEnvPos i.pos env
+
+  export
+  indexDEnv : Rename a p => Var ctx v -> DEnv p ctx -> p ctx v
+  indexDEnv i env =
+    let MkEntry _ f x = indexDEnv' i env in
+    rename f x
+
+  export
+  mapProperty : ({0 ctx : Context a} -> {0 v : a} -> p ctx v -> q ctx v) -> DEnv p ctx -> DEnv q ctx
+  mapProperty f [<] = [<]
+  mapProperty f (env :< (x :- px)) = mapProperty f env :< (x :- f px)

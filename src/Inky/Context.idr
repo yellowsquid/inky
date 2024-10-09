@@ -70,6 +70,11 @@ public export
 ctx ++ [<] = ctx
 ctx ++ ctx' :< x = (ctx ++ ctx') :< x
 
+export
+appendLinLeftNeutral : (ctx : Context a) -> [<] ++ ctx = ctx
+appendLinLeftNeutral [<] = Refl
+appendLinLeftNeutral (ctx :< x) = cong (:< x) $ appendLinLeftNeutral ctx
+
 public export
 lengthAppend : Length ctx1 -> Length ctx2 -> Length (ctx1 ++ ctx2)
 lengthAppend len1 Z = len1
@@ -110,6 +115,14 @@ toNat (There pos) = S (toNat pos)
 public export
 ThereVar : Var ctx v -> Var (ctx :< x) v
 ThereVar i = toVar (There i.pos)
+
+export
+Show (VarPos ctx x v) where
+  show i = show (toNat i)
+
+export
+Show (Var ctx v) where
+  show i = show i.pos
 
 -- Basic Properties
 
@@ -237,7 +250,7 @@ namespace Quantifier
     Lin : All p [<]
     (:<) :
       All p ctx -> (px : Assoc0 (p x.value)) ->
-      {auto 0 prf : px.name = x.name}->
+      {auto 0 prf : px.name = x.name} ->
       All p (ctx :< x)
 
   %name Quantifier.All env

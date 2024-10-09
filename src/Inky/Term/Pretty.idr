@@ -23,6 +23,7 @@ export
 prettySynth :
   {tyCtx, tmCtx : Context ()} ->
   SynthTerm tyCtx tmCtx -> Prec -> Doc ann
+export
 prettyCheck :
   {tyCtx, tmCtx : Context ()} ->
   CheckTerm tyCtx tmCtx -> Prec -> Doc ann
@@ -38,15 +39,13 @@ prettyCheckCtxBinding :
 
 prettySynth (Var i) d = pretty (unVal $ nameOf i)
 prettySynth (Lit k) d = pretty k
-prettySynth (Suc t) d =
-  parenthesise (d >= appPrec) $ group $ align $ hang 2 $
-    "suc" <+> line <+> prettyCheck t appPrec
+prettySynth Suc d = pretty "suc"
 prettySynth (App e ts) d =
   parenthesise (d >= appPrec) $ group $ align $ hang 2 $
     concatWith (surround line) (prettySynth e appPrec :: prettyAllCheck ts appPrec)
 prettySynth (Prj e x) d =
   parenthesise (d > prjPrec) $ group $ align $ hang 2 $
-    prettySynth e prjPrec <+> "." <+> pretty x
+    prettySynth e prjPrec <+> line' <+> "." <+> pretty x
 prettySynth (Expand e) d =
   "!" <+>
   (parenthesise (d > expandPrec) $ group $ align $ hang 2 $
@@ -55,17 +54,25 @@ prettySynth (Annot t a) d =
   parenthesise (d > annotPrec) $ group $ align $ hang 2 $
     prettyCheck t annotPrec <++> ":" <+> line <+> prettyType a annotPrec
 
+prettyCheck (LetTy x a t) d =
+  parenthesise (d > letPrec) $ group $ align $
+    "let" <++>
+    (group $ align $ hang 2 $
+      pretty x <++> "=" <+> line <+> prettyType a letPrec
+    ) <+> line <+>
+    "in" <+> line <+>
+    prettyCheck t letPrec
 prettyCheck (Let x e t) d =
-  parenthesise (d > letPrec) $ group $ align $ hang 2 $
+  parenthesise (d > letPrec) $ group $ align $
     "let" <++>
     (group $ align $ hang 2 $
       pretty x <++> "=" <+> line <+> prettySynth e letPrec
-    ) <++>
+    ) <+> line <+>
     "in" <+> line <+>
     prettyCheck t letPrec
 prettyCheck (Abs bound t) d =
   parenthesise (d > absPrec) $ group $ align $ hang 2 $
-    "\\" <+> concatWith (surround ",") (bindings bound <>> []) <++> "=>" <+> line <+>
+    "\\" <+> concatWith (surround $ "," <+> line) (bindings bound <>> []) <++> "=>" <+> line <+>
     prettyCheck t absPrec
   where
   bindings : Context () -> SnocList (Doc ann)
@@ -73,16 +80,15 @@ prettyCheck (Abs bound t) d =
   bindings (bound :< (x :- ())) = bindings bound :< pretty x
 prettyCheck (Inj k t) d =
   parenthesise (d > injPrec) $ group $ align $ hang 2 $
-    "<" <+> line' <+> pretty k <+> line' <+> ">" <+> prettyCheck t injPrec
+    pretty k <+> line <+> prettyCheck t injPrec
 prettyCheck (Tup ts) d =
-  parens $ group $ align $ hang 2 $
+  enclose "<" ">" $ group $ align $ hang 2 $
     concatWith (surround $ "," <+> line) (prettyCheckCtx ts tupPrec)
 prettyCheck (Case e ts) d =
   parenthesise (d > casePrec) $ group $ align $ hang 2 $
     "case" <++> prettySynth e casePrec <++> "of" <+> line <+>
-    (braces $ align $ hang 2 $
-      concatWith (surround hardline) $
-      map parens $
+    (braces $ group $ align $ hang 2 $
+      concatWith (surround $ ";" <+> line) $
       prettyCheckCtxBinding ts casePrec)
 prettyCheck (Contract t) d =
   "~" <+>
@@ -106,5 +112,5 @@ prettyCheckCtx (ts :< (x :- t)) d =
 prettyCheckCtxBinding [<] d = []
 prettyCheckCtxBinding (ts :< (x :- (y ** t))) d =
   (group $ align $ hang 2 $
-    "\\" <+> pretty x <++> pretty y <++> "=>" <+> line <+> prettyCheck t d) ::
+    pretty x <++> pretty y <++> "=>" <+> line <+> prettyCheck t d) ::
   prettyCheckCtxBinding ts d

@@ -10,14 +10,25 @@ executable = inky
 main = Inky
 
 modules
-  = Data.Maybe.Decidable
-  , Data.These.Decidable
-  , Inky
-  , Inky.Context
+  = Inky
+  , Inky.Data.Assoc
+  , Inky.Data.Context
+  , Inky.Data.Context.Var
+  , Inky.Data.Fun
+  , Inky.Data.Irrelevant
+  , Inky.Data.Row
+  , Inky.Data.SnocList
+  , Inky.Data.SnocList.Elem
+  , Inky.Data.SnocList.Quantifiers
+  , Inky.Data.SnocList.Thinning
+  , Inky.Data.SnocList.Var
+  , Inky.Data.Thinned
+  , Inky.Decidable
+  , Inky.Decidable.Either
+  , Inky.Decidable.Maybe
   , Inky.Parser
   , Inky.Term
   , Inky.Term.Parser
   , Inky.Term.Pretty
-  , Inky.Thinning
   , Inky.Type
   , Inky.Type.Pretty

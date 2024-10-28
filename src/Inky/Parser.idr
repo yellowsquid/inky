@@ -1,17 +1,19 @@
 module Inky.Parser
 
 import public Data.List.Quantifiers
-import public Data.Nat
 
 import Control.WellFounded
 import Data.Bool
 import Data.DPair
 import Data.List
 import Data.List1
+import Data.Nat
 import Data.So
 import Data.String.Extra
-import Inky.Context
-import Inky.Thinning
+import Inky.Data.Context
+import Inky.Data.Context.Var
+import Inky.Data.SnocList.Quantifiers
+import Inky.Data.SnocList.Thinning
 import Text.Lexer
 
 export
@@ -74,23 +76,24 @@ public export
 rename :
   locked1 `Thins` locked2 ->
   free1 `Thins` free2 ->
-  {auto len : Length locked2} ->
+  {auto len : LengthOf locked2} ->
   Parser i nil locked1 free1 a -> Parser i nil locked2 free2 a
 public export
 renameChain :
   locked1 `Thins` locked2 ->
   free1 `Thins` free2 ->
-  {auto len : Length locked2} ->
+  {auto len : LengthOf locked2} ->
   ParserChain i nil locked1 free1 a -> ParserChain i nil locked2 free2 a
 public export
 renameAll :
   locked1 `Thins` locked2 ->
   free1 `Thins` free2 ->
-  {auto len : Length locked2} ->
-  All.All (\nil => Parser i nil locked1 free1 a) nils ->
-  All.All (\nil => Parser i nil locked2 free2 a) nils
+  {auto len : LengthOf locked2} ->
+  {0 nils : List Bool} ->
+  All (\nil => Parser i nil locked1 free1 a) nils ->
+  All (\nil => Parser i nil locked2 free2 a) nils
 
-rename f g (Var i) = Var (index g i)
+rename f g (Var i) = Var (toVar $ indexPos g i.pos)
 rename f g (Lit text) = Lit text
 rename f g (Seq ps) = Seq (renameChain f g ps)
 rename f g (OneOf ps) = OneOf (renameAll f g ps)
@@ -107,20 +110,21 @@ renameAll f g (p :: ps) = rename f g p :: renameAll f g ps
 
 public export
 weaken :
-  (len1 : Length free2) ->
-  {auto len2 : Length locked} ->
+  (len1 : LengthOf free2) ->
+  {auto len2 : LengthOf locked} ->
   Parser i nil (free2 ++ locked) free1 a -> Parser i nil locked (free1 ++ free2) a
 public export
 weakenChain :
-  (len1 : Length free2) ->
-  {auto len2 : Length locked} ->
+  (len1 : LengthOf free2) ->
+  {auto len2 : LengthOf locked} ->
   ParserChain i nil (free2 ++ locked) free1 a -> ParserChain i nil locked (free1 ++ free2) a
 public export
 weakenAll :
-  (len1 : Length free2) ->
-  {auto len2 : Length locked} ->
-  All.All (\nil => Parser i nil (free2 ++ locked) free1 a) nils ->
-  All.All (\nil => Parser i nil locked (free1 ++ free2) a) nils
+  (len1 : LengthOf free2) ->
+  {auto len2 : LengthOf locked} ->
+  {0 nils : List Bool} ->
+  All (\nil => Parser i nil (free2 ++ locked) free1 a) nils ->
+  All (\nil => Parser i nil locked (free1 ++ free2) a) nils
 
 weaken len1 (Var x) = Var (wknL x)
 weaken len1 (Lit text) = Lit text
@@ -137,6 +141,50 @@ weakenChain len1 ((::) {nil1 = True} p ps) = weaken len1 p :: weakenChain len1 p
 weakenAll len1 [] = []
 weakenAll len1 (p :: ps) = weaken len1 p :: weakenAll len1 ps
 
+-- Substitution ----------------------------------------------------------------
+
+public export
+sub :
+  {auto len : LengthOf locked2} ->
+  (f : All (Assoc0 $ (\nilA => Parser i (fst nilA) [<] (free2 ++ locked2) (snd nilA))) locked1) ->
+  (g : All (Assoc0 $ (\nilA => Parser i (fst nilA) locked2 free2 (snd nilA))) free1) ->
+  Parser i nil locked1 free1 a -> Parser i nil locked2 free2 a
+public export
+subChain :
+  {auto len : LengthOf locked2} ->
+  (f : All (Assoc0 $ (\nilA => Parser i (fst nilA) [<] (free2 ++ locked2) (snd nilA))) locked1) ->
+  (g : All (Assoc0 $ (\nilA => Parser i (fst nilA) locked2 free2 (snd nilA))) free1) ->
+  ParserChain i nil locked1 free1 a -> ParserChain i nil locked2 free2 a
+public export
+subAll :
+  {auto len : LengthOf locked2} ->
+  (f : All (Assoc0 $ (\nilA => Parser i (fst nilA) [<] (free2 ++ locked2) (snd nilA))) locked1) ->
+  (g : All (Assoc0 $ (\nilA => Parser i (fst nilA) locked2 free2 (snd nilA))) free1) ->
+  {0 nils : List Bool} ->
+  All (\nil => Parser i nil locked1 free1 a) nils -> All (\nil => Parser i nil locked2 free2 a) nils
+
+sub f g (Var x) = (indexAll x.pos g).value
+sub f g (Lit text) = Lit text
+sub f g (Seq ps) = Seq (subChain f g ps)
+sub f g (OneOf ps) = OneOf (subAll f g ps)
+sub f g (Fix x p) =
+  Fix x $
+  sub
+    (mapProperty (map $ rename Id (Drop Id)) f :< (x :- Var (%%% x)))
+    (mapProperty (map $ rename (Drop Id) Id) g)
+    p
+sub f g (Map h p) = Map h (sub f g p)
+sub f g (WithBounds p) = WithBounds (sub f g p)
+
+subChain f g [] = []
+subChain f g ((::) {nil1 = False} p ps) =
+  sub f g p ::
+  subChain [<] (mapProperty (map $ weaken len) g ++ f) ps
+subChain f g ((::) {nil1 = True} p ps) = sub f g p :: subChain f g ps
+
+subAll f g [] = []
+subAll f g (p :: ps) = sub f g p :: subAll f g ps
+
 -- Typing ----------------------------------------------------------------------
 
 -- Lists are sufficient, as we assume each symbol appears once.
@@ -144,19 +192,20 @@ weakenAll len1 (p :: ps) = weaken len1 p :: weakenAll len1 ps
 
 public export
 peek :
-  (env : All (const (List i)) free) ->
+  (env : All (Assoc0 $ const $ List i) free) ->
   Parser i nil locked free a -> List i
 public export
 peekChain :
-  (env : All (const (List i)) free) ->
+  (env : All (Assoc0 $ const $ List i) free) ->
   ParserChain i nil locked free a -> List i
 public export
 peekAll :
-  (env : All (const (List i)) free) ->
-  All.All (\nil => Parser i nil locked free a) nils ->
-  All.All (const $ List i) nils
+  (env : All (Assoc0 $ const $ List i) free) ->
+  {0 nils : List Bool} ->
+  All (\nil => Parser i nil locked free a) nils ->
+  All (const $ List i) nils
 
-peek env (Var x) = indexAll x env
+peek env (Var x) = (indexAll x.pos env).value
 peek env (Lit text) = [text]
 peek env (Seq ps) = peekChain env ps
 peek env (OneOf ps) = concat (forget $ peekAll env ps)
@@ -173,27 +222,29 @@ peekAll env (p :: ps) = peek env p :: peekAll env ps
 
 public export
 follow :
-  (penv1 : All (const (List i)) locked) ->
-  (penv2 : All (const (List i)) free) ->
-  (fenv1 : All (const (List i)) locked) ->
-  (fenv2 : All (const (List i)) free) ->
+  (penv1 : All (Assoc0 $ const $ List i) locked) ->
+  (penv2 : All (Assoc0 $ const $ List i) free) ->
+  (fenv1 : All (Assoc0 $ const $ List i) locked) ->
+  (fenv2 : All (Assoc0 $ const $ List i) free) ->
   Parser i nil locked free a -> List i
 public export
 followChain :
-  (penv1 : All (const (List i)) locked) ->
-  (penv2 : All (const (List i)) free) ->
-  (fenv1 : All (const (List i)) locked) ->
-  (fenv2 : All (const (List i)) free) ->
+  (penv1 : All (Assoc0 $ const $ List i) locked) ->
+  (penv2 : All (Assoc0 $ const $ List i) free) ->
+  (fenv1 : All (Assoc0 $ const $ List i) locked) ->
+  (fenv2 : All (Assoc0 $ const $ List i) free) ->
   ParserChain i nil locked free a -> List i
 public export
 followAll :
-  (penv1 : All (const (List i)) locked) ->
-  (penv2 : All (const (List i)) free) ->
-  (fenv1 : All (const (List i)) locked) ->
-  (fenv2 : All (const (List i)) free) ->
-  All.All (\nil => Parser i nil locked free a) nils -> List i
+  (penv1 : All (Assoc0 $ const $ List i) locked) ->
+  (penv2 : All (Assoc0 $ const $ List i) free) ->
+  (fenv1 : All (Assoc0 $ const $ List i) locked) ->
+  (fenv2 : All (Assoc0 $ const $ List i) free) ->
+  {0 nils : List Bool} ->
+  All (\nil => Parser i nil locked free a) nils ->
+  List i
 
-follow penv1 penv2 fenv1 fenv2 (Var x) = indexAll x fenv2
+follow penv1 penv2 fenv1 fenv2 (Var x) = (indexAll x.pos fenv2).value
 follow penv1 penv2 fenv1 fenv2 (Lit text) = []
 follow penv1 penv2 fenv1 fenv2 (Seq ps) = followChain penv1 penv2 fenv1 fenv2 ps
 follow penv1 penv2 fenv1 fenv2 (OneOf ps) = followAll penv1 penv2 fenv1 fenv2 ps
@@ -241,29 +292,30 @@ namespace WellTyped
   public export
   wellTyped :
     (e : Eq i) ->
-    (penv1 : All (const (List i)) locked) ->
-    (penv2 : All (const (List i)) free) ->
-    (fenv1 : All (const (List i)) locked) ->
-    (fenv2 : All (const (List i)) free) ->
+    (penv1 : All (Assoc0 $ const $ List i) locked) ->
+    (penv2 : All (Assoc0 $ const $ List i) free) ->
+    (fenv1 : All (Assoc0 $ const $ List i) locked) ->
+    (fenv2 : All (Assoc0 $ const $ List i) free) ->
     Parser i nil locked free a ->
     Bool
   public export
   wellTypedChain :
     (e : Eq i) ->
-    (penv1 : All (const (List i)) locked) ->
-    (penv2 : All (const (List i)) free) ->
-    (fenv1 : All (const (List i)) locked) ->
-    (fenv2 : All (const (List i)) free) ->
+    (penv1 : All (Assoc0 $ const $ List i) locked) ->
+    (penv2 : All (Assoc0 $ const $ List i) free) ->
+    (fenv1 : All (Assoc0 $ const $ List i) locked) ->
+    (fenv2 : All (Assoc0 $ const $ List i) free) ->
     ParserChain i nil locked free a ->
     Bool
   public export
   allWellTyped :
     (e : Eq i) ->
-    (penv1 : All (const (List i)) locked) ->
-    (penv2 : All (const (List i)) free) ->
-    (fenv1 : All (const (List i)) locked) ->
-    (fenv2 : All (const (List i)) free) ->
-    All.All (\nil => Parser i nil locked free a) nils ->
+    (penv1 : All (Assoc0 $ const $ List i) locked) ->
+    (penv2 : All (Assoc0 $ const $ List i) free) ->
+    (fenv1 : All (Assoc0 $ const $ List i) locked) ->
+    (fenv2 : All (Assoc0 $ const $ List i) free) ->
+    {0 nils : List Bool} ->
+    All (\nil => Parser i nil locked free a) nils ->
     Bool
 
   wellTyped e penv1 penv2 fenv1 fenv2 (Var i) = True
@@ -446,8 +498,8 @@ parser :
   {0 fenv2 : _} ->
   (0 wf : So (wellTyped e penv1 penv2 fenv1 fenv2 p)) ->
   (xs : List (WithBounds (Token i))) ->
-  All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX False ys xs) -> uncurry (M ys) x) locked ->
-  All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX True ys xs) -> uncurry (M ys) x) free ->
+  All (Assoc0 (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX False ys xs) -> uncurry (M ys) x)) locked ->
+  All (Assoc0 (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX True ys xs) -> uncurry (M ys) x)) free ->
   M xs nil a
 parserChain :
   (e : Eq i) => Interpolation i =>
@@ -458,8 +510,8 @@ parserChain :
   {0 fenv2 : _} ->
   (0 wf : So (wellTypedChain e penv1 penv2 fenv1 fenv2 ps)) ->
   (xs : List (WithBounds (Token i))) ->
-  All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX False ys xs) -> uncurry (M ys) x) locked ->
-  All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX True ys xs) -> uncurry (M ys) x) free ->
+  All (Assoc0 (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX False ys xs) -> uncurry (M ys) x)) locked ->
+  All (Assoc0 (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX True ys xs) -> uncurry (M ys) x)) free ->
   M xs nil (HList as)
 parserOneOf :
   (e : Eq i) => Interpolation i =>
@@ -472,12 +524,11 @@ parserOneOf :
   {0 fenv2 : _} ->
   (0 wf : So (allWellTyped e penv1 penv2 fenv1 fenv2 ps)) ->
   (xs : List (WithBounds (Token i))) ->
-  All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX False ys xs) -> uncurry (M ys) x) locked ->
-  All (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX True ys xs) -> uncurry (M ys) x) free ->
+  All (Assoc0 (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX False ys xs) -> uncurry (M ys) x)) locked ->
+  All (Assoc0 (\x => (ys : List (WithBounds (Token i))) -> (0 _ : SmallerX True ys xs) -> uncurry (M ys) x)) free ->
   M xs (any Basics.id nils) a
 
-parser (Var x) wf xs env1 env2 =
-  indexAll x env2 xs (Lax reflexive)
+parser (Var x) wf xs env1 env2 = (indexAll x.pos env2).value xs (Lax reflexive)
 parser (Lit text) wf xs env1 env2 = take [text] xs
 parser (Seq ps) wf xs env1 env2 =
   parserChain ps wf xs env1 env2
@@ -498,10 +549,10 @@ parser (Fix {a, nil} x p) wf xs env1 env2 =
   sizeInd {P = \ys => (0 prf : SmallerX True ys xs) -> M ys nil a}
     (\ys, rec, lte =>
       f ys
-        (  mapProperty (\f, zs, 0 prf => f zs $ transX prf lte) env1
+        (  mapProperty (map (\f, zs, 0 prf => f zs $ transX prf lte)) env1
         :< (x :- (\zs, prf => rec zs (toSmaller prf) (forget $ transX prf lte)))
         )
-        (mapProperty (\f, zs, prf => f zs $ transX prf lte) env2))
+        (mapProperty (map (\f, zs, prf => f zs $ transX prf lte)) env2))
     xs (Lax reflexive)
 parser (Map f p) wf xs env1 env2 =
   f <$> parser p wf xs env1 env2
@@ -509,8 +560,8 @@ parser (WithBounds p) wf xs env1 env2 = do
   (irrel, bounds) <- bounds xs
   rewrite sym $ andTrueNeutral nil
   x <- parser p wf _
-         (mapProperty (\f, zs, 0 prf => f zs $ transX {b2 = True} prf %search) env1)
-         (mapProperty (\f, zs, 0 prf => f zs $ transX prf %search) env2)
+         (mapProperty (map (\f, zs, 0 prf => f zs $ transX {b2 = True} prf %search)) env1)
+         (mapProperty (map (\f, zs, 0 prf => f zs $ transX prf %search)) env2)
   pure (MkBounded x irrel bounds)
 
 parserChain [] wf xs env1 env2 = Ok [] xs (Lax reflexive)
@@ -521,8 +572,8 @@ parserChain ((::) {nil1 = False, nil2} p ps) wf xs env1 env2 =
     y <- parserChain ps (snd wfs')
           _
           [<]
-          (  mapProperty (\f, zs, 0 prf => f zs $ forget $ transX {b2 = False} prf %search) env2
-          ++ mapProperty (\f, zs, 0 prf => f zs $ transX prf %search) env1
+          (  mapProperty (map (\f, zs, 0 prf => f zs $ forget $ transX {b2 = False} prf %search)) env2
+          ++ mapProperty (map (\f, zs, 0 prf => f zs $ transX prf %search)) env1
           )
     pure (x :: y)
 parserChain ((::) {nil1 = True, nil2} p ps) wf xs env1 env2 =
@@ -532,8 +583,8 @@ parserChain ((::) {nil1 = True, nil2} p ps) wf xs env1 env2 =
     rewrite sym $ andTrueNeutral nil2
     y <- parserChain ps (snd wfs')
            _
-           (mapProperty (\f, zs, prf => f zs $ transX {b2 = True} prf %search) env1)
-           (mapProperty (\f, zs, prf => f zs $ transX prf %search) env2)
+           (mapProperty (map (\f, zs, prf => f zs $ transX {b2 = True} prf %search)) env1)
+           (mapProperty (map (\f, zs, prf => f zs $ transX prf %search)) env2)
     pure (x :: y)
 
 parserOneOf {nils = nil :: nils} (Here ()) (p :: ps) wf xs env1 env2 =
@@ -650,24 +701,24 @@ option p = (Just <$> p) <|> pure Nothing
 
 public export
 plus :
-  {auto len : Length locked} ->
+  {auto len : LengthOf locked} ->
   Parser i False locked free a ->
   Parser i False locked free (List1 a)
 plus p =
   Fix "plus"
     (   uncurry (:::)
-    <$> (rename (Drop Id) Id p <**> maybe [] forget <$> option (Var $ %% "plus")))
+    <$> (rename (Drop Id) Id p <**> maybe [] forget <$> option (Var $ %%% "plus")))
 
 public export
 star :
-  {auto len : Length locked} ->
+  {auto len : LengthOf locked} ->
   Parser i False locked free a ->
   Parser i True locked free (List a)
 star p = maybe [] forget <$> option (plus p)
 
 public export
 sepBy1 :
-  {auto len : Length locked} ->
+  {auto len : LengthOf locked} ->
   (sep : Parser i False locked free ()) ->
   Parser i False locked free a ->
   Parser i False locked free (List1 a)
@@ -675,7 +726,7 @@ sepBy1 sep p = uncurry (:::) <$> (p <**> star (weaken len sep **> weaken len p))
 
 public export
 sepBy :
-  {auto len : Length locked} ->
+  {auto len : LengthOf locked} ->
   (sep : Parser i False locked free ()) ->
   Parser i False locked free a ->
   Parser i True locked free (List a)

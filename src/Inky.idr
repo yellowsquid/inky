@@ -1,20 +1,23 @@
 module Inky
 
 import Collie
+
 import Control.App
 import Control.App.Console
 import Control.App.FileIO
-import Inky.Context
+
+import Inky.Decidable
+import Inky.Decidable.Maybe
 import Inky.Parser
 import Inky.Term
 import Inky.Term.Parser
 import Inky.Term.Pretty
-import Inky.Thinning
-import Inky.Type
 import Inky.Type.Pretty
+
 import System.File.Mode
 import System.File.ReadWrite
 import System.File.Virtual
+
 import Text.Lexer
 import Text.PrettyPrint.Prettyprinter
 import Text.PrettyPrint.Prettyprinter.Render.Terminal
@@ -31,7 +34,7 @@ lexInkyString file = do
     | (_, line, col, rest) => throw "\{show (1 + line)}:\{show col}: unexpected character"
   pure (filter (\x => relevant x.val.kind) tokens)
 
-parseType : HasErr String es => List (WithBounds InkyToken) -> App es (Ty [<] ())
+parseType : HasErr String es => List (WithBounds InkyToken) -> App es (Ty [<])
 parseType toks = do
   let Ok res [] _ = parse @{EqI} OpenType toks
     | Ok res (x :: _) _ => throw "\{x.bounds}: unexpected token \{x.val.kind}, expected end of input"
@@ -40,38 +43,38 @@ parseType toks = do
     | Left msg => throw msg
   pure a
 
-parseTerm : HasErr String es => List (WithBounds InkyToken) -> App es (CheckTerm [<] [<])
+parseTerm : HasErr String es => List (WithBounds InkyToken) -> App es (Term [<] [<])
 parseTerm toks = do
-  let Ok res [] _ = parse @{EqI} OpenCheck toks
+  let Ok res [] _ = parse @{EqI} OpenTerm toks
     | Ok res (x :: _) _ => throw "\{x.bounds}: unexpected token \{x.val.kind}, expected end of input"
     | Err msg => throw msg
   let Right t = res.try [<] [<]
     | Left msg => throw msg
   pure t
 
-checkType : HasErr String es => Ty [<] () -> App es ()
+checkType : HasErr String es => Ty [<] -> App es ()
 checkType a = do
-  let False = illFormed a
-    | True => throw "type ill-formed"
+  let False `Because` wf = illFormed a
+    | True `Because` bad => throw "type ill-formed"
   pure ()
 
-checkTerm : HasErr String es => Ty [<] () -> CheckTerm [<] [<] -> App es ()
+checkTerm : HasErr String es => Ty [<] -> Term [<] [<] -> App es ()
 checkTerm a t = do
-  let True = checks [<] [<] a t
-    | False => throw "term ill-typed"
+  let True `Because` prf = checks [<] [<] a t
+    | False `Because` contra => throw "term ill-typed"
   pure ()
 
 printType :
   PrimIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
-  Ty [<] () -> App es ()
+  Ty [<] -> App es ()
 printType a = do
   primIO $ renderIO $ layoutSmart opts $ prettyType a Open
 
 printTerm :
   PrimIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
-  CheckTerm [<] [<] -> App es ()
+  Term [<] [<] -> App es ()
 printTerm a = do
-  primIO $ renderIO $ layoutSmart opts $ prettyCheck a Open
+  primIO $ renderIO $ layoutSmart opts $ prettyTerm a Open
 
 readFile : FileIO es => File -> App es String
 readFile f = do

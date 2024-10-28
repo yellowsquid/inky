@@ -1,14 +1,23 @@
 module Inky.Term.Parser
 
-import public Data.Fun
+import public Inky.Data.Fun
 
+import Data.Either
+import Data.Nat
 import Data.List1
 import Data.String
-import Inky.Context
+
+import Inky.Data.Context
+import Inky.Data.Context.Var
+import Inky.Data.Row
+import Inky.Data.SnocList.Var
+import Inky.Data.SnocList.Thinning
+import Inky.Decidable
+import Inky.Decidable.Maybe
 import Inky.Parser
 import Inky.Term
-import Inky.Thinning
 import Inky.Type
+
 import Text.Lexer
 
 -- Lexer -----------------------------------------------------------------------
@@ -18,7 +27,6 @@ data InkyKind
   = TermIdent
   | TypeIdent
   | Lit
-  | Suc
   | Let
   | In
   | Case
@@ -27,6 +35,10 @@ data InkyKind
   | Fold
   | By
   | Nat
+  | List
+  | Suc
+  | Map
+  | GetChildren
   | ParenOpen
   | ParenClose
   | BracketOpen
@@ -52,7 +64,6 @@ export
   TermIdent == TermIdent = True
   TypeIdent == TypeIdent = True
   Lit == Lit = True
-  Suc == Suc = True
   Let == Let = True
   In == In = True
   Case == Case = True
@@ -61,6 +72,10 @@ export
   Fold == Fold = True
   By == By = True
   Nat == Nat = True
+  List == List = True
+  Suc == Suc = True
+  Map == Map = True
+  GetChildren == GetChildren = True
   ParenOpen == ParenOpen = True
   ParenClose == ParenClose = True
   BracketOpen == BracketOpen = True
@@ -87,7 +102,6 @@ Interpolation InkyKind where
   interpolate TermIdent = "term name"
   interpolate TypeIdent = "type name"
   interpolate Lit = "number"
-  interpolate Suc = "'suc'"
   interpolate Let = "'let'"
   interpolate In = "'in'"
   interpolate Case = "'case'"
@@ -96,6 +110,10 @@ Interpolation InkyKind where
   interpolate Fold = "'fold'"
   interpolate By = "'by'"
   interpolate Nat = "'Nat'"
+  interpolate List = "'List'"
+  interpolate Suc = "'suc'"
+  interpolate Map = "'map'"
+  interpolate GetChildren = "'getChildren'"
   interpolate ParenOpen = "'('"
   interpolate ParenClose = "')'"
   interpolate BracketOpen = "'['"
@@ -125,7 +143,6 @@ TokenKind InkyKind where
   tokValue TermIdent = id
   tokValue TypeIdent = id
   tokValue Lit = stringToNatOrZ
-  tokValue Suc = const ()
   tokValue Let = const ()
   tokValue In = const ()
   tokValue Case = const ()
@@ -134,6 +151,10 @@ TokenKind InkyKind where
   tokValue Fold = const ()
   tokValue By = const ()
   tokValue Nat = const ()
+  tokValue List = const ()
+  tokValue Suc = const ()
+  tokValue Map = const ()
+  tokValue GetChildren = const ()
   tokValue ParenOpen = const ()
   tokValue ParenClose = const ()
   tokValue BracketOpen = const ()
@@ -156,8 +177,7 @@ TokenKind InkyKind where
 
 keywords : List (String, InkyKind)
 keywords =
-  [ ("suc", Suc)
-  , ("let", Let)
+  [ ("let", Let)
   , ("in", In)
   , ("case", Case)
   , ("of", Of)
@@ -165,6 +185,10 @@ keywords =
   , ("fold", Fold)
   , ("by", By)
   , ("Nat", Nat)
+  , ("List", List)
+  , ("suc", Suc)
+  , ("map", Map)
+  , ("getChildren", GetChildren)
   ]
 
 export
@@ -221,70 +245,61 @@ tokenMap =
 -- Parser ----------------------------------------------------------------------
 
 public export
-DFun : (ts : Vect n Type) -> Fun ts Type -> Type
-DFun [] r = r
-DFun (t :: ts) r = (x : t) -> DFun ts (r x)
-
-public export
-DIFun : (ts : Vect n Type) -> Fun ts Type -> Type
-DIFun [] r = r
-DIFun (t :: ts) r = {x : t} -> DIFun ts (r x)
-
-public export
 InkyParser : Bool -> Context Type -> Context Type -> (a : Type) -> Type
 InkyParser nil locked free a =
   Parser InkyKind nil
-    (map (\a => (False, a)) locked)
-    (map (\a => (False, a)) free)
+    (map (map (False,)) locked)
+    (map (map (False,)) free)
     a
 
 public export
-record ParseFun (0 tys: Vect n Type) (0 p : Fun (map Context tys) Type) where
+record ParseFun (0 n : Nat) (0 p : Fun (replicate n $ SnocList String) Type) where
   constructor MkParseFun
-  try : DFun (map Context tys) (chain {ts = map Context tys} (Either String) p)
+  try :
+    DFun (replicate n $ SnocList String)
+      (chain (lengthOfReplicate n $ SnocList String) (Either String) p)
 
-mkVar : ({ctx : Context ()} -> Var ctx () -> p ctx) -> WithBounds String -> ParseFun [()] p
+mkVar : ({ctx : _} -> Var ctx -> p ctx) -> WithBounds String -> ParseFun 1 p
 mkVar f x =
   MkParseFun
-    (\ctx => case lookup x.val ctx of
-      Just (() ** i) => pure (f i)
+    (\ctx => case Var.lookup x.val ctx of
+      Just i => pure (f i)
       Nothing => Left "\{x.bounds}: unbound name \"\{x.val}\"")
 
 mkVar2 :
-  ({tyCtx, tmCtx : Context ()} -> Var tmCtx () -> p tyCtx tmCtx) ->
-  WithBounds String -> ParseFun [(), ()] p
+  ({tyCtx, tmCtx : _} -> Var tmCtx -> p tyCtx tmCtx) ->
+  WithBounds String -> ParseFun 2 p
 mkVar2 f x =
   MkParseFun
-    (\tyCtx, tmCtx => case lookup x.val tmCtx of
-      Just (() ** i) => pure (f i)
+    (\tyCtx, tmCtx => case Var.lookup x.val tmCtx of
+      Just i => pure (f i)
       Nothing => Left "\{x.bounds}: unbound name \"\{x.val}\"")
 
 public export
 TypeFun : Type
-TypeFun = ParseFun [()] (\ctx => Ty ctx ())
+TypeFun = ParseFun 1 Ty
 
 public export
-SynthFun : Type
-SynthFun = ParseFun [(), ()] SynthTerm
+TermFun : Type
+TermFun = ParseFun 2 Term
 
 public export
-CheckFun : Type
-CheckFun = ParseFun [(), ()] CheckTerm
-
-public export
-TypeParser : Context () -> Context () -> Type
+TypeParser : SnocList String -> SnocList String -> Type
 TypeParser locked free =
-  InkyParser False (map (const TypeFun) locked) (map (const TypeFun) free) TypeFun
+  InkyParser False (map (:- TypeFun) locked) (map (:- TypeFun) free) TypeFun
 
-RowOf : (0 free : Context Type) -> InkyParser False [<] free a -> InkyParser True [<] free (List $ WithBounds $ Assoc a)
+RowOf :
+  (0 free : Context Type) ->
+  InkyParser False [<] free a ->
+  InkyParser True [<] free (List $ WithBounds $ Assoc a)
 RowOf free p = sepBy (match Comma) (WithBounds $ mkAssoc <$> Seq [match TypeIdent, match Colon, p])
   where
   mkAssoc : HList [String, (), a] -> Assoc a
   mkAssoc [x, _, v] = x :- v
 
 tryRow :
-  List (WithBounds $ Assoc (ParseFun [()] p)) ->
-  (ctx : Context ()) -> Either String (Row $ p ctx)
+  List (WithBounds $ Assoc (ParseFun 1 p)) ->
+  (ctx : _) -> Either String (Row $ p ctx)
 tryRow xs ctx =
   foldlM
     (\row, xf => do
@@ -296,8 +311,8 @@ tryRow xs ctx =
     xs
 
 tryRow2 :
-  List (WithBounds $ Assoc (ParseFun [(), ()] p)) ->
-  (tyCtx, tmCtx : Context ()) -> Either String (Row $ p tyCtx tmCtx)
+  List (WithBounds $ Assoc (ParseFun 2 p)) ->
+  (tyCtx, tmCtx : _) -> Either String (Row $ p tyCtx tmCtx)
 tryRow2 xs tyCtx tmCtx =
   foldlM
     (\row, xf => do
@@ -308,29 +323,29 @@ tryRow2 xs tyCtx tmCtx =
     [<]
     xs
 
-OpenOrFixpointType : TypeParser [<] [<"openType" :- ()]
+OpenOrFixpointType : TypeParser [<] [<"openType"]
 OpenOrFixpointType =
   OneOf
     [ mkFix <$>
-      Seq [match Backslash, match TypeIdent, match DoubleArrow, Var (%% "openType")]
-    , Var (%% "openType")
+      Seq [match Backslash, match TypeIdent, match DoubleArrow, Var (%%% "openType")]
+    , Var (%%% "openType")
     ]
   where
   mkFix : HList [(), String, (), TypeFun] -> TypeFun
-  mkFix [_, x, _, a] = MkParseFun (\ctx => pure $ TFix x !(a.try (ctx :< (x :- ()))))
+  mkFix [_, x, _, a] = MkParseFun (\ctx => pure $ TFix x !(a.try (ctx :< x)))
 
-AtomType : TypeParser [<"openType" :- ()] [<]
+AtomType : TypeParser [<"openType"] [<]
 AtomType =
   OneOf
     [ mkVar TVar <$> WithBounds (match TypeIdent)
     , MkParseFun (\_ => pure TNat) <$ match Nat
-    , mkProd <$> enclose (match AngleOpen) (match AngleClose) Row
-    , mkSum <$> enclose (match BracketOpen) (match BracketClose) Row
+    , mkProd <$> enclose (match AngleOpen) (match AngleClose) row
+    , mkSum <$> enclose (match BracketOpen) (match BracketClose) row
     , enclose (match ParenOpen) (match ParenClose) OpenOrFixpointType
     ]
   where
-  Row : InkyParser True [<] [<"openType" :- TypeFun] (List $ WithBounds $ Assoc TypeFun)
-  Row = RowOf [<"openType" :- TypeFun] $ Var (%% "openType")
+  row : InkyParser True [<] [<"openType" :- TypeFun] (List $ WithBounds $ Assoc TypeFun)
+  row = RowOf [<"openType" :- TypeFun] $ Var (%%% "openType")
 
   mkProd : List (WithBounds $ Assoc TypeFun) -> TypeFun
   mkProd xs = MkParseFun (\ctx => TProd <$> tryRow xs ctx)
@@ -338,13 +353,25 @@ AtomType =
   mkSum : List (WithBounds $ Assoc TypeFun) -> TypeFun
   mkSum xs = MkParseFun (\ctx => TSum <$> tryRow xs ctx)
 
+AppType : TypeParser [<"openType"] [<]
+AppType =
+  OneOf
+    [ AtomType
+    , match List **> mkList <$> weaken (S Z) AtomType
+    ]
+  where
+  mkList : TypeFun -> TypeFun
+  mkList x = MkParseFun (\ctx => TList <$> x.try ctx)
+
 export
 OpenType : TypeParser [<] [<]
 OpenType =
-  Fix "openType" $ mkArrow <$> sepBy1 (match Arrow) AtomType
+  Fix "openType" $ mkArrow <$> sepBy1 (match Arrow) AppType
   where
   mkArrow : List1 TypeFun -> TypeFun
-  mkArrow = foldr1 (\x, y => MkParseFun (\ctx => [| TArrow (x.try ctx) (y.try ctx) |]))
+  mkArrow =
+    foldr1 {a = TypeFun}
+      (\x, y => MkParseFun (\ctx => [| TArrow (x.try ctx) (y.try ctx) |]))
 
 %hint
 export
@@ -353,95 +380,122 @@ OpenTypeWf = Oh
 
 -- Terms -----------------------------------------------------------------------
 
-embed : SynthFun -> CheckFun
-embed x = MkParseFun (\tyCtx, tmCtx => Embed <$> x.try tyCtx tmCtx)
-
-unembed : WithBounds CheckFun -> SynthFun
-unembed x =
-  MkParseFun (\tyCtx, tmCtx => do
-    t <- x.val.try tyCtx tmCtx
-    case t of
-      Embed e => pure e
-      _ => Left "\{x.bounds}: cannot synthesise type")
-
-AtomCheck : InkyParser False [<"openCheck" :- CheckFun] [<] CheckFun
-AtomCheck =
+AtomTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
+AtomTerm =
   OneOf
-    [ embed <$> mkVar2 Var <$> WithBounds (match TermIdent)
-    , embed <$> mkLit <$> match Lit
-    , embed <$> MkParseFun (\_, _ => pure Suc) <$ match Suc
+    [ mkVar2 Var <$> WithBounds (match TermIdent)
+    , mkLit <$> match Lit
+    , mkSuc <$ match Suc
     , mkTup <$> (enclose (match AngleOpen) (match AngleClose) $
-        RowOf [<"openCheck" :- CheckFun] (Var (%% "openCheck")))
-    , enclose (match ParenOpen) (match ParenClose) (Var (%% "openCheck"))
+        RowOf [<"openTerm" :- TermFun] (Var (%%% "openTerm")))
+    , enclose (match ParenOpen) (match ParenClose) (Var (%%% "openTerm"))
     ]
   where
-  mkLit : Nat -> SynthFun
-  mkLit k = MkParseFun (\_, _ => pure (Lit k))
+  mkLit : Nat -> TermFun
+  mkLit k = MkParseFun (\tyCtx, tmCtx => pure (Lit k))
 
-  mkTup : List (WithBounds $ Assoc CheckFun) -> CheckFun
+  mkSuc : TermFun
+  mkSuc = MkParseFun (\_, _ => pure Suc)
+
+  mkTup : List (WithBounds $ Assoc TermFun) -> TermFun
   mkTup xs = MkParseFun (\tyCtx, tmCtx => Tup <$> tryRow2 xs tyCtx tmCtx)
 
-PrefixCheck : InkyParser False [<"openCheck" :- CheckFun] [<] CheckFun
-PrefixCheck =
-  Fix "prefixCheck" $ OneOf
-    [ embed <$> mkExpand <$> unembed <$> (match Bang **> WithBounds (Var $ %% "prefixCheck"))
-    , mkContract <$> (match Tilde **> Var (%% "prefixCheck"))
-    , rename (Drop Id) Id AtomCheck
+PrefixTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
+PrefixTerm =
+  Fix "prefixTerm" $ OneOf
+    [ match Tilde **> (mkRoll <$> Var (%%% "prefixTerm"))
+    , match Bang **> mkUnroll <$> Var (%%% "prefixTerm")
+    , rename (Drop Id) Id AtomTerm
     ]
   where
-  mkExpand : SynthFun -> SynthFun
-  mkExpand x = MkParseFun (\tyCtx, tmCtx => [| Expand (x.try tyCtx tmCtx) |])
+  mkRoll : TermFun -> TermFun
+  mkRoll x = MkParseFun (\tyCtx, tmCtx => [| Roll (x.try tyCtx tmCtx) |])
 
-  mkContract : CheckFun -> CheckFun
-  mkContract x = MkParseFun (\tyCtx, tmCtx => [| Contract (x.try tyCtx tmCtx) |])
+  mkUnroll : TermFun -> TermFun
+  mkUnroll x = MkParseFun (\tyCtx, tmCtx => [| Unroll (x.try tyCtx tmCtx) |])
 
-SuffixCheck : InkyParser False [<"openCheck" :- CheckFun] [<] CheckFun
-SuffixCheck = mkSuffix <$> Seq [ WithBounds PrefixCheck , star (match Dot **> match TypeIdent) ]
+SuffixTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
+SuffixTerm = mkSuffix <$> Seq [ PrefixTerm , star (match Dot **> match TypeIdent) ]
   where
-  mkSuffix : HList [WithBounds CheckFun, List String] -> CheckFun
-  mkSuffix [t, []] = t.val
+  mkSuffix : HList [TermFun, List String] -> TermFun
+  mkSuffix [t, []] = t
   mkSuffix [t, prjs] =
-    embed $
-    MkParseFun (\tyCtx, tmCtx => pure $ foldl Prj !((unembed t).try tyCtx tmCtx) prjs)
+    MkParseFun (\tyCtx, tmCtx => pure $ foldl Prj !(t.try tyCtx tmCtx) prjs)
 
-AppCheck : InkyParser False [<"openCheck" :- CheckFun] [<] CheckFun
-AppCheck =
+AppTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
+AppTerm =
   OneOf
     [ mkInj <$> Seq
       [ match TypeIdent
-      , weaken (S Z) SuffixCheck
+      , weaken (S Z) SuffixTerm
       ]
-    , mkApp <$> Seq [ WithBounds SuffixCheck , star (weaken (S Z) SuffixCheck) ]
+    , mkApp <$> Seq
+      [ OneOf {nils = [False, False, False]}
+        [ SuffixTerm
+        , mkMap <$> Seq
+          [ match Map
+          , enclose (match ParenOpen) (match ParenClose) $ Seq
+            [ match Backslash
+            , match TypeIdent
+            , match DoubleArrow
+            , rename Id (Drop Id) OpenType
+            ]
+          , sub [<"openType" :- rename Id (Drop Id) OpenType] [<] AtomType
+          , sub [<"openType" :- rename Id (Drop Id) OpenType] [<] AtomType
+          ]
+        , mkGetChildren <$> Seq
+          [ match GetChildren
+          , enclose (match ParenOpen) (match ParenClose) $ Seq
+            [ match Backslash
+            , match TypeIdent
+            , match DoubleArrow
+            , rename Id (Drop Id) OpenType
+            ]
+          , sub [<"openType" :- rename Id (Drop Id) OpenType] [<] AtomType
+          ]
+        ]
+      , star (weaken (S Z) SuffixTerm)
+      ]
     ]
   where
-  mkInj : HList [String, CheckFun] -> CheckFun
+  mkInj : HList [String, TermFun] -> TermFun
   mkInj [tag, t] = MkParseFun (\tyCtx, tmCtx => Inj tag <$> t.try tyCtx tmCtx)
 
-  mkApp : HList [WithBounds CheckFun, List CheckFun] -> CheckFun
-  mkApp [t, []] = t.val
+  mkMap : HList [_, HList [_, String, _, TypeFun], TypeFun, TypeFun] -> TermFun
+  mkMap [_, [_, x, _, a], b, c] =
+    MkParseFun (\tyCtx, tmCtx =>
+      pure $ Map (x ** !(a.try (tyCtx :< x))) !(b.try tyCtx) !(c.try tyCtx))
+
+  mkGetChildren : HList [_, HList [_, String, _, TypeFun], TypeFun] -> TermFun
+  mkGetChildren [_, [_, x, _, a], b] =
+    MkParseFun (\tyCtx, tmCtx =>
+      pure $ GetChildren (x ** !(a.try (tyCtx :< x))) !(b.try tyCtx))
+
+  mkApp : HList [TermFun, List TermFun] -> TermFun
+  mkApp [t, []] = t
   mkApp [fun, (arg :: args)] =
     MkParseFun (\tyCtx, tmCtx =>
-      pure $ Embed $
+      pure $
       App
-        !((unembed fun).try tyCtx tmCtx)
+        !(fun.try tyCtx tmCtx)
         (  !(arg.try tyCtx tmCtx)
         :: (!(foldlM (\acc, arg => pure $ acc :< !(arg.try tyCtx tmCtx)) [<] args) <>> [])))
 
-AnnotCheck : InkyParser False [<"openCheck" :- CheckFun] [<] CheckFun
-AnnotCheck =
+AnnotTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
+AnnotTerm =
   mkAnnot <$> Seq
-    [ AppCheck
+    [ AppTerm
     , option (match Colon **> rename Id (Drop Id) OpenType)
     ]
   where
-  mkAnnot : HList [CheckFun, Maybe TypeFun] -> CheckFun
+  mkAnnot : HList [TermFun, Maybe TypeFun] -> TermFun
   mkAnnot [t, Nothing] = t
-  mkAnnot [t, Just a] = embed $ MkParseFun (\tyCtx, tmCtx => [| Annot (t.try tyCtx tmCtx) (a.try tyCtx) |])
+  mkAnnot [t, Just a] = MkParseFun (\tyCtx, tmCtx => [| Annot (t.try tyCtx tmCtx) (a.try tyCtx) |])
 
 -- Open Terms
 
-LetCheck : InkyParser False [<"openCheck" :- CheckFun] [<] CheckFun
-LetCheck =
+LetTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
+LetTerm =
   match Let **>
   OneOf
     [ mkLet <$> Seq
@@ -453,71 +507,72 @@ LetCheck =
           , match Colon
           , rename Id (Drop Id) OpenType
           , match Equal
-          , Var (%% "openCheck")]
-        , match Equal **> unembed <$> WithBounds (Var (%% "openCheck"))
+          , Var (%%% "openTerm")]
+        , match Equal **> Var (%%% "openTerm")
         ]
       , match In
-      , Var (%% "openCheck")
+      , Var (%%% "openTerm")
       ]
     , mkLetType <$> Seq
       [ match TypeIdent
       , match Equal
       , rename Id (Drop Id) OpenType
       , match In
-      , Var (%% "openCheck")
+      , Var (%%% "openTerm")
       ]
     ]
   where
-  mkLet : HList [String, SynthFun, (), CheckFun] -> CheckFun
-  mkLet [x, e, _, t] = MkParseFun (\tyCtx, tmCtx => pure $ Let x !(e.try tyCtx tmCtx) !(t.try tyCtx (tmCtx :< (x :- ()))))
+  mkLet : HList [String, TermFun, (), TermFun] -> TermFun
+  mkLet [x, e, _, t] = MkParseFun (\tyCtx, tmCtx => pure $ Let !(e.try tyCtx tmCtx) (x ** !(t.try tyCtx (tmCtx :< x))))
 
-  mkLetType : HList [String, (), TypeFun, (), CheckFun] -> CheckFun
+  mkLetType : HList [String, (), TypeFun, (), TermFun] -> TermFun
   mkLetType [x, _, a, _, t] =
-    MkParseFun (\tyCtx, tmCtx => pure $ LetTy x !(a.try tyCtx) !(t.try (tyCtx :< (x :- ())) tmCtx))
+    MkParseFun (\tyCtx, tmCtx => pure $ LetTy !(a.try tyCtx) (x ** !(t.try (tyCtx :< x) tmCtx)))
 
   mkArrow : List TypeFun -> TypeFun -> TypeFun
   mkArrow [] cod = cod
   mkArrow (arg :: args) cod =
     MkParseFun (\ctx => [| TArrow (arg.try ctx) ((mkArrow args cod).try ctx) |])
 
-  mkBound : HList [List (HList [String, (), TypeFun]), (), TypeFun, (), CheckFun] -> SynthFun
+  mkBound : HList [List (HList [String, (), TypeFun]), (), TypeFun, (), TermFun] -> TermFun
   mkBound [[], _, cod, _, t] =
     MkParseFun (\tyCtx, tmCtx =>
       pure $
       Annot !(t.try tyCtx tmCtx) !(cod.try tyCtx))
   mkBound [args, _, cod, _, t] =
-    let dom = foldl (\dom, [x, _, a] => dom :< (x :- ())) [<] args in
+    let bound = map (\[x, _, a] => x) args in
+    let tys = map (\[x, _, a] => a) args in
     MkParseFun (\tyCtx, tmCtx =>
       pure $
-      Annot (Abs dom !(t.try tyCtx (tmCtx ++ dom))) !((mkArrow (map (\[x, _, a] => a) args) cod).try tyCtx))
+      Annot (Abs (bound ** !(t.try tyCtx (tmCtx <>< bound)))) !((mkArrow tys cod).try tyCtx))
 
-AbsCheck : InkyParser False [<"openCheck" :- CheckFun] [<] CheckFun
-AbsCheck =
+AbsTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
+AbsTerm =
   mkAbs <$> Seq
     [ match Backslash
     , sepBy1 (match Comma) (match TermIdent)
     , match DoubleArrow
-    , Var (%% "openCheck")
+    , Var (%%% "openTerm")
     ]
   where
-  mkAbs : HList [(), List1 String, (), CheckFun] -> CheckFun
+  mkAbs : HList [(), List1 String, (), TermFun] -> TermFun
   mkAbs [_, args, _, body] =
-    let args = foldl (\args, x => args :< (x :- ())) [<] args in
-    MkParseFun (\tyCtx, tmCtx => Abs args <$> body.try tyCtx (tmCtx ++ args))
+    MkParseFun (\tyCtx, tmCtx =>
+      pure $ Abs (forget args ** !(body.try tyCtx (tmCtx <>< forget args))))
 
-CaseCheck : InkyParser False [<"openCheck" :- CheckFun] [<] CheckFun
-CaseCheck =
+CaseTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
+CaseTerm =
   (\[f, x] => f x) <$>
   Seq
     [ OneOf
       [ mkCase <$> Seq
         [ match Case
-        , unembed <$> WithBounds (Var $ %% "openCheck")
+        , Var (%%% "openTerm")
         , match Of
         ]
       , mkFoldCase <$> Seq
         [ match FoldCase
-        , unembed <$> WithBounds (Var $ %% "openCheck")
+        , Var (%%% "openTerm")
         , match By
         ]
       ]
@@ -528,66 +583,66 @@ CaseCheck =
           [ match TypeIdent
           , match TermIdent
           , match DoubleArrow
-          , Var (%% "openCheck")
+          , Var (%%% "openTerm")
           ])
     ]
   where
   Cases : Type
-  Cases = List (WithBounds $ HList [String, String, (), CheckFun])
+  Cases = List (WithBounds $ HList [String, String, (), TermFun])
 
   mkBranch :
-    HList [String, String, (), CheckFun] ->
-    Assoc (ParseFun [(), ()] $ \tyCtx, tmCtx => (x ** CheckTerm tyCtx (tmCtx :< (x :- ()))))
+    HList [String, String, (), TermFun] ->
+    Assoc (ParseFun 2 $ \tyCtx, tmCtx => (x ** Term tyCtx (tmCtx :< x)))
   mkBranch [tag, bound, _, branch] =
-    tag :- MkParseFun (\tyCtx, tmCtx => pure (bound ** !(branch.try tyCtx (tmCtx :< (bound :- ())))))
+    tag :- MkParseFun (\tyCtx, tmCtx => pure (bound ** !(branch.try tyCtx (tmCtx :< bound))))
 
-  mkCase : HList [_, SynthFun, _] -> Cases -> CheckFun
+  mkCase : HList [_, TermFun, _] -> Cases -> TermFun
   mkCase [_, target, _] branches =
     let branches = map (map mkBranch) branches in
     MkParseFun (\tyCtx, tmCtx =>
       [| Case (target.try tyCtx tmCtx) (tryRow2 branches tyCtx tmCtx) |])
 
-  mkFoldCase : HList [_, SynthFun, _] -> Cases -> CheckFun
+  mkFoldCase : HList [_, TermFun, _] -> Cases -> TermFun
   mkFoldCase [_, target, _] branches =
     let branches = map (map mkBranch) branches in
     MkParseFun (\tyCtx, tmCtx =>
       pure $
       Fold
         !(target.try tyCtx tmCtx)
-        "__tmp"
-        (Case (Var $ %% "__tmp") !(tryRow2 branches tyCtx (tmCtx :< ("__tmp" :- ())))))
+        ("__tmp" ** Case (Var $ %% "__tmp") !(tryRow2 branches tyCtx (tmCtx :< "__tmp"))))
 
-FoldCheck : InkyParser False [<"openCheck" :- CheckFun] [<] CheckFun
-FoldCheck =
+FoldTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
+FoldTerm =
   mkFold <$> Seq
     [ match Fold
-    , unembed <$> WithBounds (Var (%% "openCheck"))
+    , Var (%%% "openTerm")
     , match By
     , enclose (match ParenOpen) (match ParenClose) $
       Seq
         [ match Backslash
         , match TermIdent
         , match DoubleArrow
-        , Var (%% "openCheck")
+        , Var (%%% "openTerm")
         ]
     ]
   where
-  mkFold : HList [(), SynthFun, (), HList [(), String, (), CheckFun]] -> CheckFun
+  mkFold : HList [(), TermFun, (), HList [(), String, (), TermFun]] -> TermFun
   mkFold [_, target, _, [_, arg, _, body]] =
-    MkParseFun (\tyCtx, tmCtx => pure $ Fold !(target.try tyCtx tmCtx) arg !(body.try tyCtx (tmCtx :< (arg :- ()))))
+    MkParseFun (\tyCtx, tmCtx =>
+      pure $ Fold !(target.try tyCtx tmCtx) (arg ** !(body.try tyCtx (tmCtx :< arg))))
 
 export
-OpenCheck : InkyParser False [<] [<] CheckFun
-OpenCheck =
-  Fix "openCheck" $ OneOf
-    [ LetCheck
-    , AbsCheck
-    , CaseCheck
-    , FoldCheck
-    , AnnotCheck
+OpenTerm : InkyParser False [<] [<] TermFun
+OpenTerm =
+  Fix "openTerm" $ OneOf
+    [ LetTerm
+    , AbsTerm
+    , CaseTerm
+    , FoldTerm
+    , AnnotTerm
     ]
 
 %hint
 export
-OpenCheckWf : So (wellTyped EqI [<] [<] [<] [<] OpenCheck)
-OpenCheckWf = ?d -- Oh
+OpenTermWf : So (wellTyped EqI [<] [<] [<] [<] OpenTerm)
+OpenTermWf = Oh

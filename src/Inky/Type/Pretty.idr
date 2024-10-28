@@ -1,43 +1,55 @@
 module Inky.Type.Pretty
 
-import Inky.Context
+import Data.Singleton
+import Inky.Decidable
 import Inky.Type
 import Text.PrettyPrint.Prettyprinter
 
-arrowPrec, prodPrec, sumPrec, fixPrec : Prec
+arrowPrec, prodPrec, sumPrec, fixPrec, listPrec : Prec
 arrowPrec = Open
 prodPrec = Open
 sumPrec = Open
 fixPrec = Open
+listPrec = App
 
 export
-prettyType : {ctx : Context ()} -> Ty ctx () -> Prec -> Doc ann
-prettyTypeRow : {ctx : Context ()} -> Row (Ty ctx ()) -> Prec -> List (Doc ann)
+prettyType : {ctx : SnocList String} -> Ty ctx -> Prec -> Doc ann
+lessPrettyType : {ctx : SnocList String} -> Ty ctx -> Prec -> Doc ann
+lessPrettyTypeRow : {ctx : SnocList String} -> Context (Ty ctx) -> Prec -> List (Doc ann)
 
-prettyType (TVar i) d = pretty (unVal $ nameOf i)
-prettyType TNat d = pretty "Nat"
-prettyType (TArrow a b) d =
+prettyType a d =
+  if does (alpha {ctx2 = [<]} a TNat)
+  then pretty "Nat"
+  else case isList a of
+    Just b =>
+      parenthesise (d >= listPrec) $ group $ align $ hang 2 $
+        pretty "List" <+> line <+>
+        prettyType (assert_smaller a b) d
+    Nothing => lessPrettyType a d
+
+lessPrettyType (TVar i) d = pretty (unVal $ nameOf i)
+lessPrettyType (TArrow a b) d =
   parenthesise (d > arrowPrec) $ group $ align $ hang 2 $
     let parts = stripArrow b in
     concatWith (surround $ neutral <++> "->" <+> line) (prettyType a arrowPrec :: parts)
   where
-  stripArrow : Ty ctx () -> List (Doc ann)
+  stripArrow : Ty ctx -> List (Doc ann)
   stripArrow (TArrow a b) = prettyType a arrowPrec :: stripArrow b
   stripArrow a = [prettyType a arrowPrec]
-prettyType (TProd as) d =
+lessPrettyType (TProd (MkRow as _)) d =
   enclose "<" ">" $ group $ align $ hang 2 $
-    let parts = prettyTypeRow as prodPrec in
+    let parts = lessPrettyTypeRow as prodPrec in
     concatWith (surround $ "," <+> line) parts
-prettyType (TSum as) d =
+lessPrettyType (TSum (MkRow as _)) d =
   enclose "[" "]" $ group $ align $ hang 2 $
-    let parts = prettyTypeRow as prodPrec in
+    let parts = lessPrettyTypeRow as prodPrec in
     concatWith (surround $ "," <+> line) parts
-prettyType (TFix x a) d =
+lessPrettyType (TFix x a) d =
   parens $ group $ align $ hang 2 $
     "\\" <+> pretty x <++> "=>" <+> line <+>
     prettyType a fixPrec
 
-prettyTypeRow [<] d = []
-prettyTypeRow (as :< (x :- a)) d =
+lessPrettyTypeRow [<] d = []
+lessPrettyTypeRow (as :< (x :- a)) d =
   (group $ align $ hang 2 $ pretty x <+> ":" <+> line <+> prettyType a d)
-  :: prettyTypeRow as d
+  :: lessPrettyTypeRow as d

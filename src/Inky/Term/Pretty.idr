@@ -1,116 +1,130 @@
 module Inky.Term.Pretty
 
-import Inky.Context
+import Data.Singleton
+
+import Inky.Decidable.Maybe
 import Inky.Term
 import Inky.Type.Pretty
 import Text.PrettyPrint.Prettyprinter
 
-appPrec, prjPrec, expandPrec, annotPrec,
-  letPrec, absPrec, injPrec, tupPrec, casePrec, contractPrec, foldPrec : Prec
+appPrec, prjPrec, unrollPrec, annotPrec,
+  letPrec, absPrec, injPrec, tupPrec, casePrec, rollPrec, foldPrec : Prec
 appPrec = App
 prjPrec = User 9
-expandPrec = PrefixMinus
+unrollPrec = PrefixMinus
 annotPrec = Equal
 letPrec = Open
 absPrec = Open
 injPrec = App
 tupPrec = Open
 casePrec = Open
-contractPrec = PrefixMinus
+rollPrec = PrefixMinus
 foldPrec = Open
 
 export
-prettySynth :
-  {tyCtx, tmCtx : Context ()} ->
-  SynthTerm tyCtx tmCtx -> Prec -> Doc ann
-export
-prettyCheck :
-  {tyCtx, tmCtx : Context ()} ->
-  CheckTerm tyCtx tmCtx -> Prec -> Doc ann
-prettyAllCheck :
-  {tyCtx, tmCtx : Context ()} ->
-  List (CheckTerm tyCtx tmCtx) -> Prec -> List (Doc ann)
-prettyCheckCtx :
-  {tyCtx, tmCtx : Context ()} ->
-  Row (CheckTerm tyCtx tmCtx) -> Prec -> List (Doc ann)
-prettyCheckCtxBinding :
-  {tyCtx, tmCtx : Context ()} ->
-  Row (x ** CheckTerm tyCtx (tmCtx :< (x :- ()))) -> Prec -> List (Doc ann)
+prettyTerm : {tyCtx, tmCtx : SnocList String} -> Term tyCtx tmCtx -> Prec -> Doc ann
+prettyAllTerm : {tyCtx, tmCtx : SnocList String} -> List (Term tyCtx tmCtx) -> Prec -> List (Doc ann)
+prettyTermCtx : {tyCtx, tmCtx : SnocList String} -> Context (Term tyCtx tmCtx) -> Prec -> SnocList (Doc ann)
+prettyCases : {tyCtx, tmCtx : SnocList String} -> Context (x ** Term tyCtx (tmCtx :< x)) -> SnocList (Doc ann)
+lessPrettyTerm : {tyCtx, tmCtx : SnocList String} -> Term tyCtx tmCtx -> Prec -> Doc ann
 
-prettySynth (Var i) d = pretty (unVal $ nameOf i)
-prettySynth (Lit k) d = pretty k
-prettySynth Suc d = pretty "suc"
-prettySynth (App e ts) d =
-  parenthesise (d >= appPrec) $ group $ align $ hang 2 $
-    concatWith (surround line) (prettySynth e appPrec :: prettyAllCheck ts appPrec)
-prettySynth (Prj e x) d =
-  parenthesise (d > prjPrec) $ group $ align $ hang 2 $
-    prettySynth e prjPrec <+> line' <+> "." <+> pretty x
-prettySynth (Expand e) d =
-  "!" <+>
-  (parenthesise (d > expandPrec) $ group $ align $ hang 2 $
-    prettySynth e expandPrec)
-prettySynth (Annot t a) d =
+prettyTerm t d =
+  case isLit t <|> isCheckLit t of
+    Just k => pretty k
+    Nothing =>
+      if isSuc t
+      then pretty "suc"
+      else lessPrettyTerm t d
+
+prettyAllTerm [] d = []
+prettyAllTerm (t :: ts) d = prettyTerm t d :: prettyAllTerm ts d
+
+prettyTermCtx [<] d = [<]
+prettyTermCtx (ts :< (l :- t)) d = prettyTermCtx ts d :< (pretty l <+> ":" <++> prettyTerm t d)
+
+prettyCases [<] = [<]
+prettyCases (ts :< (l :- (x ** t))) =
+  prettyCases ts :< (pretty l <++> pretty x <++> "=>" <++> prettyTerm t Open)
+
+
+lessPrettyTerm (Annot t a) d =
   parenthesise (d > annotPrec) $ group $ align $ hang 2 $
-    prettyCheck t annotPrec <++> ":" <+> line <+> prettyType a annotPrec
-
-prettyCheck (LetTy x a t) d =
+    prettyTerm t annotPrec <++> ":" <+> line <+> prettyType a annotPrec
+lessPrettyTerm (Var i) d = pretty (unVal $ nameOf i)
+lessPrettyTerm (Let e (x ** t)) d =
   parenthesise (d > letPrec) $ group $ align $
-    "let" <++>
+    (group $ align $ hang 2 $
+      pretty x <++> "=" <+> line <+> prettyTerm e letPrec
+    ) <+> line <+>
+    "in" <+> line <+>
+    prettyTerm t letPrec
+lessPrettyTerm (LetTy a (x ** t)) d =
+  parenthesise (d > letPrec) $ group $ align $
     (group $ align $ hang 2 $
       pretty x <++> "=" <+> line <+> prettyType a letPrec
     ) <+> line <+>
     "in" <+> line <+>
-    prettyCheck t letPrec
-prettyCheck (Let x e t) d =
-  parenthesise (d > letPrec) $ group $ align $
-    "let" <++>
-    (group $ align $ hang 2 $
-      pretty x <++> "=" <+> line <+> prettySynth e letPrec
-    ) <+> line <+>
-    "in" <+> line <+>
-    prettyCheck t letPrec
-prettyCheck (Abs bound t) d =
-  parenthesise (d > absPrec) $ group $ align $ hang 2 $
-    "\\" <+> concatWith (surround $ "," <+> line) (bindings bound <>> []) <++> "=>" <+> line <+>
-    prettyCheck t absPrec
-  where
-  bindings : Context () -> SnocList (Doc ann)
-  bindings [<] = [<]
-  bindings (bound :< (x :- ())) = bindings bound :< pretty x
-prettyCheck (Inj k t) d =
-  parenthesise (d > injPrec) $ group $ align $ hang 2 $
-    pretty k <+> line <+> prettyCheck t injPrec
-prettyCheck (Tup ts) d =
+    prettyTerm t letPrec
+lessPrettyTerm (Abs (bound ** t)) d =
+  parenthesise (d > absPrec) $ group $ hang 2 $
+    "\\" <+> concatWith (surround $ "," <+> line) (map pretty bound) <++> "=>" <+> line <+>
+    prettyTerm t absPrec
+lessPrettyTerm (App (Map (x ** a) b c) ts) d =
+  parenthesise (d >= appPrec) $ group $ align $ hang 2 $
+    concatWith (surround line)
+      (  pretty "map"
+      :: parens (group $ align $ hang 2 $ "\\" <+> pretty x <+> "=>" <+> line <+> prettyType a Open)
+      :: prettyType b appPrec
+      :: prettyType c appPrec
+      :: prettyAllTerm ts appPrec)
+lessPrettyTerm (App (GetChildren (x ** a) b) ts) d =
+  parenthesise (d >= appPrec) $ group $ align $ hang 2 $
+    concatWith (surround line)
+      (  pretty "getChildren"
+      :: parens (group $ align $ hang 2 $ "\\" <+> pretty x <+> "=>" <+> line <+> prettyType a Open)
+      :: prettyType b appPrec
+      :: prettyAllTerm ts appPrec)
+lessPrettyTerm (App f ts) d =
+  parenthesise (d >= appPrec) $ group $ align $ hang 2 $
+    concatWith (surround line) (prettyTerm f appPrec :: prettyAllTerm ts appPrec)
+lessPrettyTerm (Tup (MkRow ts _)) d =
   enclose "<" ">" $ group $ align $ hang 2 $
-    concatWith (surround $ "," <+> line) (prettyCheckCtx ts tupPrec)
-prettyCheck (Case e ts) d =
+    concatWith (surround $ "<" <+> line) (prettyTermCtx ts tupPrec <>> [])
+lessPrettyTerm (Prj e l) d =
+  parenthesise (d > prjPrec) $ group $ align $ hang 2 $
+    prettyTerm e prjPrec <+> line' <+> "." <+> pretty l
+lessPrettyTerm (Inj l t) d =
+  parenthesise (d >= injPrec) $ group $ align $ hang 2 $
+    pretty l <+> line <+> prettyTerm t absPrec
+lessPrettyTerm (Case e (MkRow ts _)) d =
   parenthesise (d > casePrec) $ group $ align $ hang 2 $
-    "case" <++> prettySynth e casePrec <++> "of" <+> line <+>
+    "case" <++> prettyTerm e casePrec <++> "of" <+> hardline <+>
     (braces $ group $ align $ hang 2 $
-      concatWith (surround $ ";" <+> line) $
-      prettyCheckCtxBinding ts casePrec)
-prettyCheck (Contract t) d =
-  "~" <+>
-  (parenthesise (d > contractPrec) $ group $ align $ hang 2 $
-    prettyCheck t contractPrec)
-prettyCheck (Fold e x t) d =
+      concatWith (surround $ ";" <+> hardline) $
+      prettyCases ts <>> [])
+lessPrettyTerm (Roll t) d =
+  pretty "~" <+>
+  (parenthesise (d > rollPrec) $ group $ align $ hang 2 $ prettyTerm t rollPrec)
+lessPrettyTerm (Unroll e) d =
+  pretty "!" <+>
+  (parenthesise (d > unrollPrec) $ group $ align $ hang 2 $ prettyTerm e unrollPrec)
+lessPrettyTerm (Fold e (x ** t)) d =
   parenthesise (d > foldPrec) $ group $ align $ hang 2 $
-    "fold" <++> prettySynth e foldPrec <++> "by" <+> line <+>
+    "fold" <++> prettyTerm e foldPrec <++> "by" <+> hardline <+>
     (parens $ group $ align $ hang 2 $
-      "\\" <+> pretty x <++> "=>" <+> line <+> prettyCheck t foldPrec)
-prettyCheck (Embed e) d = prettySynth e d
-
-prettyAllCheck [] d = []
-prettyAllCheck (t :: ts) d = prettyCheck t d :: prettyAllCheck ts d
-
-prettyCheckCtx [<] d = []
-prettyCheckCtx (ts :< (x :- t)) d =
-  (group $ align $ hang 2 $ pretty x <+> ":" <+> line <+> prettyCheck t d) ::
-  prettyCheckCtx ts d
-
-prettyCheckCtxBinding [<] d = []
-prettyCheckCtxBinding (ts :< (x :- (y ** t))) d =
-  (group $ align $ hang 2 $
-    pretty x <++> pretty y <++> "=>" <+> line <+> prettyCheck t d) ::
-  prettyCheckCtxBinding ts d
+      "\\" <+> pretty x <++> "=>" <+> line <+> prettyTerm t Open)
+lessPrettyTerm (Map (x ** a) b c) d =
+  parenthesise (d >= appPrec) $ group $ align $ hang 2 $
+    concatWith (surround line)
+      [ pretty "map"
+      , parens (group $ align $ hang 2 $ "\\" <+> pretty x <+> "=>" <+> line <+> prettyType a Open)
+      , prettyType b appPrec
+      , prettyType c appPrec
+      ]
+lessPrettyTerm (GetChildren (x ** a) b) d =
+  parenthesise (d >= appPrec) $ group $ align $ hang 2 $
+    concatWith (surround line)
+      [ pretty "getChildren"
+      , parens (group $ align $ hang 2 $ "\\" <+> pretty x <+> "=>" <+> line <+> prettyType a Open)
+      , prettyType b appPrec
+      ]

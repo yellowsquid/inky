@@ -43,7 +43,7 @@ parseType toks = do
     | Left msg => throw msg
   pure a
 
-parseTerm : HasErr String es => List (WithBounds InkyToken) -> App es (Term [<] [<])
+parseTerm : HasErr String es => List (WithBounds InkyToken) -> App es (Term Bounds [<] [<])
 parseTerm toks = do
   let Ok res [] _ = parse @{EqI} OpenTerm toks
     | Ok res (x :: _) _ => throw "\{x.bounds}: unexpected token \{x.val.kind}, expected end of input"
@@ -58,10 +58,10 @@ checkType a = do
     | True `Because` bad => throw "type ill-formed"
   pure ()
 
-checkTerm : HasErr String es => Ty [<] -> Term [<] [<] -> App es ()
+checkTerm : (a : Ty [<]) -> (t : Term m [<] [<]) -> HasErr (NotChecks [<] [<] a t) es => App es ()
 checkTerm a t = do
   let True `Because` prf = checks [<] [<] a t
-    | False `Because` contra => throw "term ill-typed"
+    | False `Because` contra => throw contra
   pure ()
 
 printType :
@@ -72,9 +72,19 @@ printType a = do
 
 printTerm :
   PrimIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
-  Term [<] [<] -> App es ()
+  Term m [<] [<] -> App es ()
 printTerm a = do
   primIO $ renderIO $ layoutSmart opts $ prettyTerm a Open
+
+printCheckError :
+  PrimIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
+  {a : Ty [<]} -> {t : Term Bounds [<] [<]} ->
+  NotChecks [<] [<] a t -> App es ()
+printCheckError contra =
+  primIO $ renderIO $ layoutSmart opts $
+  concatWith (surround hardline) $
+  map (\(bounds, msg) => group $ align $ hang 2 $ pretty "\{bounds}:" <+> line <+> msg) $
+  prettyNotChecks contra
 
 readFile : FileIO es => File -> App es String
 readFile f = do
@@ -207,7 +217,8 @@ main = run {l = MayThrow} $ do
                 handle {err = String} (checkType a) pure abortErr
                 pure a)
               type
-          handle {err = String} (checkTerm a t) pure abortErr
+          handle {err = NotChecks [<] [<] a t} (checkTerm a t) pure
+            (\contra => do printCheckError contra; primIO exitFailure)
         ]
       ]
     ]

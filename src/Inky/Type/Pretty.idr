@@ -55,13 +55,13 @@ lessPrettyType (TProd (MkRow as _)) d =
   let parts = lessPrettyTypeCtx as Open <>> [] in
   group $ align $ enclose "<" ">" $
     flatAlt
-      (neutral <++> concatWith (surround $ line' <+> "," <++> neutral) parts <+> line)
+      (neutral <++> concatWith (surround $ line <+> "," <++> neutral) parts <+> line)
       (concatWith (surround $ "," <++> neutral) parts)
 lessPrettyType (TSum (MkRow as _)) d =
   let parts = lessPrettyTypeCtx as Open <>> [] in
   group $ align $ enclose "[" "]" $
     flatAlt
-      (neutral <++> concatWith (surround $ line' <+> "," <++> neutral) parts <+> line)
+      (neutral <++> concatWith (surround $ line <+> "," <++> neutral) parts <+> line)
       (concatWith (surround $ "," <++> neutral) parts)
 lessPrettyType (TFix x a) d =
   group $ align $ hang 2 $ parens $
@@ -71,4 +71,4 @@ lessPrettyType (TFix x a) d =
 lessPrettyTypeCtx [<] d = [<]
 lessPrettyTypeCtx (as :< (x :- a)) d =
   lessPrettyTypeCtx as d :<
-  (group $ align $ hang 2 $ pretty x <+> ":" <+> line <+> prettyType a d)
+  (group $ align $ pretty x <+> ":" <+> line <+> prettyType a d)

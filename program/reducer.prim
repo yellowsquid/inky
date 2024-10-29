@@ -1,0 +1,123 @@
+let Bool = [T: <>, F: <>] in
+let or (x : Bool) (y : Bool) : Bool = case x of {T u => T <>; F u => y} in
+let SysT =
+  (\T =>
+    [ Var: Nat
+    , Zero: <>
+    , Suc: T
+    , Primrec: <Zero: T, Suc: T, Target: T>
+    , Abs: T
+    , App: <Fun: T, Arg: T>
+    ])
+in
+let Stepped = <Term: SysT, Smaller: Bool> in
+let lift (f : Nat -> Nat) (n : Nat) : Nat =
+  case !n of {Z u => 0; S k => suc (f k)}
+in
+let rename (t : SysT) : (Nat -> Nat) -> SysT =
+  foldcase t by
+    { Var n => \f => ~(Var (f n))
+    ; Zero u => \f => ~(Zero <>)
+    ; Suc r => \f => ~(Suc (r f))
+    ; Primrec p => \f =>
+      ~(Primrec <Zero: p.Zero f, Suc: p.Suc (lift f), Target: p.Target f>)
+    ; Abs r => \f => ~(Abs (r f))
+    ; App p => \f => ~(App <Fun: p.Fun f, Arg: p.Arg f>)
+    }
+in
+let index (xs : List SysT) : Nat -> SysT =
+  foldcase xs by
+    { N u => \k => ~(Var k)
+    ; C p => \k => case !k of {Z u => p.H; S k => p.T k}
+    }
+in
+let shift = map (\X => List X) SysT SysT (\t => rename t suc) in
+let sub (t : SysT) : List SysT -> SysT =
+  foldcase t by
+    { Var n => \env => index env n
+    ; Zero u => \env => ~(Zero <>)
+    ; Suc f => \env => ~(Suc (f env))
+    ; Primrec p => \env =>
+      ~(Primrec
+         < Zero: p.Zero env
+         , Suc: p.Suc ~(C <H: ~(Var 0), T: shift env>)
+         , Target: p.Target env
+         >)
+    ; Abs f => \env => ~(Abs (f ~(C <H: ~(Var 0), T: shift env>)))
+    ; App p => \env => ~(App <Fun: p.Fun env, Arg: p.Arg env>)
+    }
+in
+let app (fun : SysT) (arg : SysT) (smaller : Bool) : Stepped =
+  let default : Stepped = <Term: ~(App <Fun: fun, Arg: arg>), Smaller: smaller>
+  in
+  case !fun of
+    { Var n => default
+    ; Zero u => default
+    ; Suc t => default
+    ; Primrec p => default
+    ; Abs t => <Term: sub t ~(C <H: arg, T: ~(N <>)>), Smaller: T <>>
+    ; App t => default
+    }
+in
+let rec (z : SysT) (s : SysT) (target : SysT) (smaller : Bool) : Stepped =
+  let default : Stepped =
+    <Term: ~(Primrec <Zero: z, Suc: s, Target: target>), Smaller: smaller>
+  in
+  case !target of
+    { Var n => default
+    ; Zero u => <Term: z, Smaller: T <>>
+    ; Suc t =>
+      < Term:
+          sub s ~(C <H: ~(Primrec <Zero: z, Suc: s, Target: t>), T: ~(N <>)>)
+      , Smaller: T <>
+      >
+    ; Primrec p => default
+    ; Abs t => default
+    ; App t => default
+    }
+in
+let step (t : SysT) : Stepped =
+  foldcase t by
+    { Var n => <Term: ~(Var n), Smaller: F <>>
+    ; Zero u => <Term: ~(Zero <>), Smaller: F <>>
+    ; Suc t => <Term: ~(Suc t.Term), Smaller: t.Smaller>
+    ; Primrec t =>
+      case t.Target.Smaller of
+        { F u =>
+          rec
+            t.Zero.Term
+            t.Suc.Term
+            t.Target.Term
+            (or t.Zero.Smaller t.Suc.Smaller)
+        ; T u =>
+          < Term:
+              ~(Primrec
+                 (map
+                   (\X => <Zero: X, Suc: X, Target: X>)
+                   Stepped
+                   SysT
+                   (\p => p.Term)
+                   t))
+          , Smaller: T <>
+          >
+        }
+    ; Abs t => <Term: ~(Abs t.Term), Smaller: t.Smaller>
+    ; App t =>
+      case t.Arg.Smaller of
+        { F u => app t.Fun.Term t.Arg.Term t.Fun.Smaller
+        ; T u =>
+          < Term:
+              ~(App
+                 (map (\X => <Fun: X, Arg: X>) Stepped SysT (\p => p.Term) t))
+          , Smaller: T <>
+          >
+        }
+    }
+in
+\n =>
+  foldcase n by
+    { Z u => \t => t
+    ; S f => \t =>
+      let stepped = step t in
+      case stepped.Smaller of {F u => stepped.Term; T u => f stepped.Term}
+    }

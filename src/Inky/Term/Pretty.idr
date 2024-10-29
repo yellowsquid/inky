@@ -66,7 +66,9 @@ prettyAllTerm [] d = []
 prettyAllTerm (t :: ts) d = prettyTerm t d :: prettyAllTerm ts d
 
 prettyTermCtx [<] d = [<]
-prettyTermCtx (ts :< (l :- t)) d = prettyTermCtx ts d :< (pretty l <+> ":" <++> prettyTerm t d)
+prettyTermCtx (ts :< (l :- t)) d =
+  prettyTermCtx ts d :<
+  (group $ hang 2 $ pretty l <+> ":" <+> line <+> prettyTerm t d)
 
 prettyCases [<] = [<]
 prettyCases (ts :< (l :- (x ** Abs _ (bound ** t)))) =
@@ -89,11 +91,43 @@ prettyLet binding term =
   term
 
 lessPrettyTerm (Annot _ t a) d =
-  group $ align $ hang 2 $ parenthesise (d < Annot) $
-    prettyTerm t App <++> ":" <+> line <+> prettyType a Open
+  group $ align $ parenthesise (d < Annot) $
+    prettyTerm t App <+> line <+>
+    ":" <++> prettyType a Open
 lessPrettyTerm (Var _ i) d = pretty (unVal $ nameOf i)
+lessPrettyTerm (Let _ (Annot _ (Abs _ (bound ** e)) a) (x ** t)) d =
+  let (binds, cod, rest) = groupBinds bound a in
+  let binds = map (\x => parens (pretty x.name <++> ":" <++> prettyType x.value Open)) binds in
+  group $ align $ parenthesise (d < Open) $
+  prettyLet
+    ( (group $ hang 2 $ flatAlt
+        ( pretty x <+> line <+>
+          concatWith (surround line) binds <+> line <+>
+          ":" <++> prettyType cod Open
+        )
+        (pretty x <++> concatWith (<++>) binds <++> ":" <++> prettyType cod Open)
+      ) <++> "=" <+>
+      ( if null rest
+        then neutral
+        else neutral <++> "\\" <+> concatWith (surround $ "," <++> neutral) (map pretty rest) <++> "=>")
+      <+> line <+> prettyTerm e Open
+    )
+    (prettyTerm t Open)
+  where
+  groupBinds : List String -> Ty tyCtx -> (List (Assoc $ Ty tyCtx), Ty tyCtx, List String)
+  groupBinds [] a = ([], a, [])
+  groupBinds (x :: xs) (TArrow a b) =
+    let (binds, cod, rest) = groupBinds xs b in
+    ((x :- a) :: binds, cod, rest)
+  groupBinds xs a = ([], a, xs)
+lessPrettyTerm (Let _ (Annot _ e a) (x ** t)) d =
+  group $ align $ parenthesise (d < Open) $
+  prettyLet
+    ( pretty x <++> ":" <++> prettyType a Open <++> "=" <+> line <+>
+      prettyTerm e Open
+    )
+    (prettyTerm t Open)
 lessPrettyTerm (Let _ e (x ** t)) d =
-  -- TODO: pretty print annotated abstraction
   group $ align $ parenthesise (d < Open) $
   prettyLet
     (pretty x <++> "=" <+> line <+> prettyTerm e Open)
@@ -105,7 +139,7 @@ lessPrettyTerm (LetTy _ a (x ** t)) d =
     (prettyTerm t Open)
 lessPrettyTerm (Abs _ (bound ** t)) d =
   group $ hang 2 $ parenthesise (d < Open) $
-    "\\" <+> concatWith (surround $ "," <+> line) (map pretty bound) <++> "=>" <+> line <+>
+    "\\" <+> concatWith (surround $ "," <++> neutral) (map pretty bound) <++> "=>" <+> line <+>
     prettyTerm t Open
 lessPrettyTerm (App _ (Map _ (x ** a) b c) ts) d =
   group $ align $ hang 2 $ parenthesise (d < App) $
@@ -141,20 +175,26 @@ lessPrettyTerm (Case _ e (MkRow ts _)) d =
   let parts = prettyCases ts <>> [] in
   group $ align $ hang 2 $ parenthesise (d < Open) $
     (group $ hang (-2) $ "case" <++> prettyTerm e Open <+> line <+> "of") <+> line <+>
-    (braces $
-      flatAlt
-        (neutral <++> concatWith (surround $ line' <+> ";" <++> neutral) parts <+> line)
-        (concatWith (surround $ ";" <++> neutral) parts))
+    (braces $ flatAlt
+      (neutral <++> concatWith (surround $ line' <+> ";" <++> neutral) parts <+> line)
+      (concatWith (surround $ ";" <++> neutral) parts))
 lessPrettyTerm (Roll _ t) d =
   pretty "~" <+>
   parenthesise (d < Prefix) (group $ align $ hang 2 $ prettyTerm t Prefix)
 lessPrettyTerm (Unroll _ e) d =
   pretty "!" <+>
-  parenthesise (d > Prefix) (group $ align $ hang 2 $ prettyTerm e Prefix)
-lessPrettyTerm (Fold _ e (x ** t)) d =
-  -- TODO: foldcase
+  parenthesise (d < Prefix) (group $ align $ hang 2 $ prettyTerm e Prefix)
+lessPrettyTerm (Fold _ e ("__tmp" ** Case _ (Var _ ((%%) "__tmp" {pos = Here})) (MkRow ts _))) d =
+  let parts = prettyCases ts <>> [] in
+  -- XXX: should check for usage of "__tmp" in ts
   group $ align $ hang 2 $ parenthesise (d < Open) $
-    "fold" <++> prettyTerm e Open <++> "by" <+> hardline <+>
+    (group $ hang (-2) $ "foldcase" <++> prettyTerm e Open <+> line <+> "by") <+> line <+>
+    (braces $ flatAlt
+      (neutral <++> concatWith (surround $ line' <+> ";" <++> neutral) parts <+> line)
+      (concatWith (surround $ ";" <++> neutral) parts))
+lessPrettyTerm (Fold _ e (x ** t)) d =
+  group $ align $ hang 2 $ parenthesise (d < Open) $
+    (group $ hang (-2) $ "fold" <++> prettyTerm e Open <++> "by") <+> line <+>
     (group $ align $ hang 2 $ parens $
       "\\" <+> pretty x <++> "=>" <+> line <+> prettyTerm t Open)
 lessPrettyTerm (Map _ (x ** a) b c) d =

@@ -512,7 +512,7 @@ namespace Occurs
 
 export
 Uninhabited (i `OccursInAny` [<]) where
-  uninhabited (And prf) impossible
+  uninhabited (And contras) impossible
 
 export
 strengthenSplit : Strengthen i a b -> i `OccursIn` a -> Void
@@ -569,7 +569,26 @@ strengthenAll i (as :< (l :- a)) =
 
 -- Not Strictly Positive -----------------------------------------------------------
 
--- We use negation so we get a cause on failure.
+namespace StrictlyPositive
+  public export
+  data StrictlyPositiveIn : Var ctx -> Ty ctx -> Type
+  public export
+  data StrictlyPositiveInAll : Var ctx -> Context (Ty ctx) -> Type
+
+  data StrictlyPositiveIn where
+    TVar : i `StrictlyPositiveIn` TVar j
+    TArrow : Strengthen i (TArrow a b) c -> i `StrictlyPositiveIn` TArrow a b
+    TProd : i `StrictlyPositiveInAll` as.context -> i `StrictlyPositiveIn` TProd as
+    TSum : i `StrictlyPositiveInAll` as.context -> i `StrictlyPositiveIn` TSum as
+    TFix : ThereVar i `StrictlyPositiveIn` a -> i `StrictlyPositiveIn` TFix x a
+  data StrictlyPositiveInAll where
+    Lin : i `StrictlyPositiveInAll` [<]
+    (:<) :
+      i `StrictlyPositiveInAll` as -> i `StrictlyPositiveIn` a ->
+      i `StrictlyPositiveInAll` (as :< (l :- a))
+
+  %name StrictlyPositiveIn prf
+  %name StrictlyPositiveInAll prfs
 
 namespace NotPositive
   public export
@@ -588,54 +607,79 @@ namespace NotPositive
       These (i `NotPositiveInAny` as) (i `NotPositiveIn` a) ->
       i `NotPositiveInAny` (as :< (n :- a))
 
-  %name NotPositiveIn prf
-  %name NotPositiveInAny prf
+  %name NotPositiveIn contra
+  %name NotPositiveInAny contras
 
 export
 Uninhabited (i `NotPositiveIn` TVar j) where
-  uninhabited (TArrow prf) impossible
+  uninhabited (TArrow contra) impossible
 
 export
 Uninhabited (i `NotPositiveInAny` [<]) where
-  uninhabited (And prf) impossible
+  uninhabited (And contras) impossible
 
 export
-getOccurs : i `NotPositiveIn` a -> i `OccursIn` a
+strictlyPositiveSplit : i `StrictlyPositiveIn` a -> i `NotPositiveIn` a -> Void
+strictlyPositiveAllSplit : i `StrictlyPositiveInAll` as -> i `NotPositiveInAny` as -> Void
+
+strictlyPositiveSplit (TArrow prf) (TArrow contra) = strengthenSplit prf contra
+strictlyPositiveSplit (TProd prfs) (TProd contras) = strictlyPositiveAllSplit prfs contras
+strictlyPositiveSplit (TSum prfs) (TSum contras) = strictlyPositiveAllSplit prfs contras
+strictlyPositiveSplit (TFix prf) (TFix contra) = strictlyPositiveSplit prf contra
+
+strictlyPositiveAllSplit (prfs :< prf) (And contras) =
+  these
+    (strictlyPositiveAllSplit prfs)
+    (strictlyPositiveSplit prf)
+    (const $ strictlyPositiveSplit prf)
+    contras
+
 export
-getOccursAny : i `NotPositiveInAny` as -> i `OccursInAny` as
+strictlyPositiveIn :
+  (i : Var ctx) -> (a : Ty ctx) ->
+  LazyEither (i `StrictlyPositiveIn` a) (i `NotPositiveIn` a)
+strictlyPositiveInAll :
+  (i : Var ctx) -> (as : Context (Ty ctx)) ->
+  LazyEither (i `StrictlyPositiveInAll` as) (i `NotPositiveInAny` as)
 
-getOccurs (TArrow prf) = prf
-getOccurs (TProd prf) = TProd (getOccursAny prf)
-getOccurs (TSum prf) = TSum (getOccursAny prf)
-getOccurs (TFix prf) = TFix (getOccurs prf)
-
-getOccursAny (And (This prf)) = And (This (getOccursAny prf))
-getOccursAny (And (That prf)) = And (That (getOccurs prf))
-getOccursAny (And (Both prf1 prf2)) = And (Both (getOccursAny prf1) (getOccurs prf2))
-
-export
-notPositiveIn : (i : Var ctx) -> (a : Ty ctx) -> Dec' (i `NotPositiveIn` a)
-notPositiveInAny : (i : Var ctx) -> (as : Context (Ty ctx)) -> Dec' (i `NotPositiveInAny` as)
-
-i `notPositiveIn` TVar j = False `Because` absurd
-i `notPositiveIn` TArrow a b =
-  map TArrow (\(_ ** prf) => \case (TArrow contra) => strengthenSplit prf contra) $
-  not $
+i `strictlyPositiveIn` TVar j = True `Because` TVar
+i `strictlyPositiveIn` TArrow a b =
+  map (\(_ ** prf) => TArrow prf) TArrow $
   (strengthen i $ TArrow a b).forget
-i `notPositiveIn` TProd (MkRow as _) = mapDec TProd (\case TProd prf => prf) (i `notPositiveInAny` as)
-i `notPositiveIn` TSum (MkRow as _) = mapDec TSum (\case TSum prf => prf) (i `notPositiveInAny` as)
-i `notPositiveIn` TFix x a = mapDec TFix (\case TFix prf => prf) $ ThereVar i `notPositiveIn` a
+i `strictlyPositiveIn` TProd (MkRow as _) = map TProd TProd $ i `strictlyPositiveInAll` as
+i `strictlyPositiveIn` TSum (MkRow as _) = map TSum TSum $ i `strictlyPositiveInAll` as
+i `strictlyPositiveIn` TFix x a = map TFix TFix $ ThereVar i `strictlyPositiveIn` a
 
-i `notPositiveInAny` [<] = False `Because` absurd
-i `notPositiveInAny` (as :< (n :- a)) =
-  mapDec (And . swap) (\case And prf => swap prf) $
-  orDec (i `notPositiveIn` a) (i `notPositiveInAny` as)
+i `strictlyPositiveInAll` [<] = True `Because` [<]
+i `strictlyPositiveInAll` (as :< (n :- a)) =
+  map (uncurry (:<) . swap) (And . swap) $
+  all (i `strictlyPositiveIn` a) (i `strictlyPositiveInAll` as)
 
 -- Well Formed -----------------------------------------------------------------
 
 -- Negating decidable properties is fun.
 
 namespace WellFormed
+  public export
+  data WellFormed : Ty ctx -> Type
+  public export
+  data AllWellFormed : Context (Ty ctx) -> Type
+
+  data WellFormed where
+    TVar : WellFormed (TVar i)
+    TArrow : WellFormed a -> WellFormed b -> WellFormed (TArrow a b)
+    TProd : AllWellFormed as.context -> WellFormed (TProd as)
+    TSum : AllWellFormed as.context -> WellFormed (TSum as)
+    TFix : toVar Here `StrictlyPositiveIn` a -> WellFormed a -> WellFormed (TFix x a)
+
+  data AllWellFormed where
+    Lin : AllWellFormed [<]
+    (:<) : AllWellFormed as -> WellFormed a -> AllWellFormed (as :< (n :- a))
+
+  %name WellFormed wf
+  %name AllWellFormed wfs
+
+namespace IllFormed
   public export
   data IllFormed : Ty ctx -> Type
   public export
@@ -650,6 +694,9 @@ namespace WellFormed
   data AnyIllFormed where
     And : These (AnyIllFormed as) (IllFormed a) -> AnyIllFormed (as :< (n :- a))
 
+  %name IllFormed bad
+  %name AnyIllFormed bads
+
 export
 Uninhabited (IllFormed (TVar i)) where
   uninhabited (TArrow prf) impossible
@@ -659,20 +706,34 @@ Uninhabited (AnyIllFormed [<]) where
   uninhabited (And prf) impossible
 
 export
-illFormed : (a : Ty ctx) -> Dec' (IllFormed a)
+wellFormedSplit : WellFormed a -> IllFormed a -> Void
+allWellFormedSplit : AllWellFormed as -> AnyIllFormed as -> Void
+
+wellFormedSplit (TArrow wf1 wf2) (TArrow bads) =
+  these (wellFormedSplit wf1) (wellFormedSplit wf2) (const $ wellFormedSplit wf2) bads
+wellFormedSplit (TProd wfs) (TProd bads) = allWellFormedSplit wfs bads
+wellFormedSplit (TSum wfs) (TSum bads) = allWellFormedSplit wfs bads
+wellFormedSplit (TFix prf wf) (TFix bads) =
+  these (strictlyPositiveSplit prf) (wellFormedSplit wf) (const $ wellFormedSplit wf) bads
+
+allWellFormedSplit (wfs :< wf) (And bads) =
+  these (allWellFormedSplit wfs) (wellFormedSplit wf) (const $ wellFormedSplit wf) bads
+
 export
-anyIllFormed : (as : Context (Ty ctx)) -> Dec' (AnyIllFormed as)
+wellFormed : (a : Ty ctx) -> LazyEither (WellFormed a) (IllFormed a)
+export
+allWellFormed : (as : Context (Ty ctx)) -> LazyEither (AllWellFormed as) (AnyIllFormed as)
 
-illFormed (TVar j) = False `Because` absurd
-illFormed (TArrow a b) = mapDec TArrow (\case TArrow prf => prf) $ orDec (illFormed a) (illFormed b)
-illFormed (TProd (MkRow as _)) = mapDec TProd (\case TProd prf => prf) (anyIllFormed as)
-illFormed (TSum (MkRow as _)) = mapDec TSum (\case TSum prf => prf) (anyIllFormed as)
-illFormed (TFix x a) = mapDec TFix (\case TFix prf => prf) $ orDec (%% x `notPositiveIn` a) (illFormed a)
+wellFormed (TVar j) = True `Because` TVar
+wellFormed (TArrow a b) = map (uncurry TArrow) TArrow $ all (wellFormed a) (wellFormed b)
+wellFormed (TProd (MkRow as _)) = map TProd TProd $ allWellFormed as
+wellFormed (TSum (MkRow as _)) = map TSum TSum $ allWellFormed as
+wellFormed (TFix x a) = map (uncurry TFix) TFix $ all (%% x `strictlyPositiveIn` a) (wellFormed a)
 
-anyIllFormed [<] = False `Because` absurd
-anyIllFormed (as :< (n :- a)) =
-  mapDec (And . swap) (\case And prf => swap prf) $
-  orDec (illFormed a) (anyIllFormed as)
+allWellFormed [<] = True `Because` [<]
+allWellFormed (as :< (n :- a)) =
+  map (uncurry (:<) . swap) (And . swap) $
+  all (wellFormed a) (allWellFormed as)
 
 --------------------------------------------------------------------------------
 -- Substitution ----------------------------------------------------------------

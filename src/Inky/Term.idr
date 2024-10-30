@@ -220,7 +220,7 @@ namespace Branches
 
 data Synths where
   AnnotS :
-    Not (IllFormed a) ->
+    WellFormed a ->
     Checks tyEnv tmEnv (sub tyEnv a) t ->
     Synths tyEnv tmEnv (Annot meta t a) (sub tyEnv a)
   VarS :
@@ -230,7 +230,7 @@ data Synths where
     Synths tyEnv (tmEnv :< (a `Over` Id)) f b ->
     Synths tyEnv tmEnv (Let meta e (x ** f)) b
   LetTyS :
-    Not (IllFormed a) ->
+    WellFormed a ->
     Synths (tyEnv :< (sub tyEnv a `Over` Id)) tmEnv e b ->
     Synths tyEnv tmEnv (LetTy meta a (x ** e)) b
   AppS :
@@ -248,16 +248,16 @@ data Synths where
     Synths tyEnv tmEnv e (TFix x a) ->
     Synths tyEnv tmEnv (Unroll meta e) (sub [<TFix x a `Over` Id] a)
   MapS :
-    Not (IllFormed (TFix x a)) ->
-    Not (IllFormed b) ->
-    Not (IllFormed c) ->
+    WellFormed (TFix x a) ->
+    WellFormed b ->
+    WellFormed c ->
     Synths tyEnv tmEnv (Map meta (x ** a) b c)
       (TArrow (TArrow (sub tyEnv b) (sub tyEnv c))
       (TArrow (sub (tyEnv :< (sub tyEnv b `Over` Id)) a)
               (sub (tyEnv :< (sub tyEnv c `Over` Id)) a)))
   GetChildrenS :
-    Not (IllFormed (TFix x a)) ->
-    Not (IllFormed b) ->
+    WellFormed (TFix x a) ->
+    WellFormed b ->
     Synths tyEnv tmEnv (GetChildren meta (x ** a) b)
       (TArrow (sub (tyEnv :< (sub tyEnv b `Over` Id)) a)
         (TProd
@@ -275,7 +275,7 @@ data Checks where
     Checks tyEnv (tmEnv :< (a `Over` Id)) b t ->
     Checks tyEnv tmEnv b (Let meta e (x ** t))
   LetTyC :
-    Not (IllFormed a) ->
+    WellFormed a ->
     Checks (tyEnv :< (sub tyEnv a `Over` Id)) tmEnv b t ->
     Checks tyEnv tmEnv b (LetTy meta a (x ** t))
   AbsC :
@@ -600,14 +600,14 @@ allBranchesSplit :
   AllBranches tyEnv tmEnv as a ts -> AnyNotBranches tyEnv tmEnv as a ts -> Void
 
 synthsSplit (AnnotS wf prf) (AnnotNS contras) =
-  these wf (checksSplit prf) (const $ checksSplit prf) contras
+  these (wellFormedSplit wf) (checksSplit prf) (const $ checksSplit prf) contras
 synthsSplit VarS contra = absurd contra
 synthsSplit (LetS prf1 prf2) (LetNS1 contra) = synthsSplit prf1 contra
 synthsSplit (LetS prf1 prf2) (LetNS2 prf1' contra) =
   let contra = rewrite synthsUnique prf1 prf1' in contra in
   synthsSplit prf2 contra
 synthsSplit (LetTyS wf prf) (LetTyNS contras) =
-  these wf (synthsSplit prf) (const $ synthsSplit prf) contras
+  these (wellFormedSplit wf) (synthsSplit prf) (const $ synthsSplit prf) contras
 synthsSplit (AppS prf prfs) (AppNS1 contra) = synthsSplit prf contra
 synthsSplit (AppS prf prfs) (AppNS2 prf' contras) =
   let contras = rewrite synthsUnique prf prf' in contras in
@@ -623,9 +623,12 @@ synthsSplit (UnrollS prf) (UnrollNS1 contra) = synthsSplit prf contra
 synthsSplit (UnrollS {x, a} prf) (UnrollNS2 prf' contra) =
   void $ contra x a $ synthsUnique prf' prf
 synthsSplit (MapS wf1 wf2 wf3) (MapNS contras) =
-  these wf1 (these wf2 wf3 (const wf3)) (const $ these wf2 wf3 (const wf3)) contras
+  these (wellFormedSplit wf1)
+    (these (wellFormedSplit wf2) (wellFormedSplit wf3) (const $ wellFormedSplit wf3))
+    (const $ these (wellFormedSplit wf2) (wellFormedSplit wf3) (const $ wellFormedSplit wf3))
+    contras
 synthsSplit (GetChildrenS wf1 wf2) (GetChildrenNS contras) =
-  these wf1 wf2 (const wf2) contras
+  these (wellFormedSplit wf1) (wellFormedSplit wf2) (const $ wellFormedSplit wf2) contras
 
 checksSplit (EmbedC _ prf1 prf2) (EmbedNC1 _ contra) = synthsSplit prf1 contra
 checksSplit (EmbedC _ prf1 prf2) (EmbedNC2 _ prf1' contra) =
@@ -636,7 +639,7 @@ checksSplit (LetC prf1 prf2) (LetNC2 prf1' contra) =
   let contra = rewrite synthsUnique prf1 prf1' in contra in
   checksSplit prf2 contra
 checksSplit (LetTyC wf prf) (LetTyNC contras) =
-  these wf (checksSplit prf) (const $ checksSplit prf) contras
+  these (wellFormedSplit wf) (checksSplit prf) (const $ checksSplit prf) contras
 checksSplit (AbsC prf1 prf2) (AbsNC1 contra) = isFunctionSplit prf1 contra
 checksSplit (AbsC prf1 prf2) (AbsNC2 prf1' contra) =
   let (eq1, eq2) = isFunctionUnique prf1 prf1' in
@@ -752,7 +755,7 @@ allBranches :
 synths tyEnv tmEnv (Annot _ t a) =
   pure (sub tyEnv a) $
   map (uncurry AnnotS) AnnotNS $
-  all (not $ illFormed a) (checks tyEnv tmEnv (sub tyEnv a) t)
+  all (wellFormed a) (checks tyEnv tmEnv (sub tyEnv a) t)
 synths tyEnv tmEnv (Var _ i) = Just (indexAll i.pos tmEnv).extract `Because` VarS
 synths tyEnv tmEnv (Let _ e (x ** f)) =
   map snd
@@ -761,7 +764,7 @@ synths tyEnv tmEnv (Let _ e (x ** f)) =
   (a := synths tyEnv tmEnv e) >=> synths tyEnv (tmEnv :< (a `Over` Id)) f
 synths tyEnv tmEnv (LetTy _ a (x ** e)) =
   map id (\_, (wf, prf) => LetTyS wf prf) LetTyNS $
-  all (not $ illFormed a) (synths (tyEnv :< (sub tyEnv a `Over` Id)) tmEnv e)
+  all (wellFormed a) (synths (tyEnv :< (sub tyEnv a `Over` Id)) tmEnv e)
 synths tyEnv tmEnv (Abs _ (bound ** t)) = Nothing `Because` ChecksNS Abs
 synths tyEnv tmEnv (App _ e ts) =
   map snd
@@ -821,11 +824,11 @@ synths tyEnv tmEnv (Fold _ e (x ** t)) = Nothing `Because` ChecksNS Fold
 synths tyEnv tmEnv (Map _ (x ** a) b c) =
   pure _ $
   map (\(wf1, wf2, wf3) => MapS wf1 wf2 wf3) MapNS $
-  all (not $ illFormed (TFix x a)) (all (not $ illFormed b) (not $ illFormed c))
+  all (wellFormed (TFix x a)) (all (wellFormed b) (wellFormed c))
 synths tyEnv tmEnv (GetChildren _ (x ** a) b) =
   pure _ $
   map (uncurry GetChildrenS) GetChildrenNS $
-  all (not $ illFormed (TFix x a)) (not $ illFormed b)
+  all (wellFormed (TFix x a)) (wellFormed b)
 
 checks tyEnv tmEnv a (Annot meta t b) = fallbackCheck Annot (synths tyEnv tmEnv $ Annot meta t b) a
 checks tyEnv tmEnv a (Var meta i) = fallbackCheck Var (synths tyEnv tmEnv $ Var meta i) a
@@ -836,7 +839,7 @@ checks tyEnv tmEnv a (Let _ e (x ** t)) =
   (b := synths tyEnv tmEnv e) >=> checks tyEnv (tmEnv :< (b `Over` Id)) a t
 checks tyEnv tmEnv a (LetTy _ b (x ** t)) =
   map (uncurry LetTyC) LetTyNC $
-  all (not $ illFormed b) (checks (tyEnv :< (sub tyEnv b `Over` Id)) tmEnv a t)
+  all (wellFormed b) (checks (tyEnv :< (sub tyEnv b `Over` Id)) tmEnv a t)
 checks tyEnv tmEnv a (Abs meta (bound ** t)) =
   map
     (\((_, _) ** (prf1, prf2)) => AbsC prf1 prf2)

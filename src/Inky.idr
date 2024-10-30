@@ -54,8 +54,8 @@ parseTerm toks = do
 
 checkType : HasErr String es => Ty [<] -> App es ()
 checkType a = do
-  let False `Because` wf = illFormed a
-    | True `Because` bad => throw "type ill-formed"
+  let True `Because` wf = wellFormed a
+    | False `Because` bad => throw "type ill-formed"
   pure ()
 
 checkTerm : (a : Ty [<]) -> (t : Term m [<] [<]) -> HasErr (NotChecks [<] [<] a t) es => App es ()

@@ -141,9 +141,9 @@ desugarSynths (MapS {meta, x, a, b, c} (TFix prf1 wf1) wf2 wf3) =
   Annot meta
     (Abs meta
       (["_fun", "_arg"] ** desugarMap a (%% x) prf1 (Var meta (%% "_fun")) (Var meta (%% "_arg"))))
-    (TArrow (TArrow (TArrow b c)
-      (sub (tabulate len (\i => _ :- TVar (toVar i)) :< (x :- b)) a))
-      (sub (tabulate len (\i => _ :- TVar (toVar i)) :< (x :- c)) a))
+    (TArrow (TArrow b c) (TArrow
+      (sub (tabulate len (\i => _ :- TVar (toVar i)) :< (x :- b)) a)
+      (sub (tabulate len (\i => _ :- TVar (toVar i)) :< (x :- c)) a)))
 
 desugarChecks (AnnotC prf1 prf2) = desugarSynths prf1
 desugarChecks (VarC prf1 prf2) = desugarSynths prf1
@@ -249,9 +249,9 @@ maybeDesugar (Map meta (x ** a) b c) =
       Annot meta
         (Abs meta
           (["_fun", "_arg"] ** desugarMap a (%% x) prf (Var meta (%% "_fun")) (Var meta (%% "_arg"))))
-        (TArrow (TArrow (TArrow b c)
-          (sub (tabulate len (\i => _ :- TVar (toVar i)) :< (x :- b)) a))
-          (sub (tabulate len (\i => _ :- TVar (toVar i)) :< (x :- c)) a))
+        (TArrow (TArrow b c) (TArrow
+          (sub (tabulate len (\i => _ :- TVar (toVar i)) :< (x :- b)) a)
+          (sub (tabulate len (\i => _ :- TVar (toVar i)) :< (x :- c)) a)))
 
 maybeDesugarList [] = pure []
 maybeDesugarList (t :: ts) = [| maybeDesugar t :: maybeDesugarList ts |]

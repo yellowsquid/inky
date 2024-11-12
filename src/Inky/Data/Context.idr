@@ -24,13 +24,11 @@ mapNames f (ctx :< nx) = cong (:< nx.name) $ mapNames f ctx
 -- Construction ----------------------------------------------------------------
 
 public export
-fromAll : (ctx : Context a) -> All (const b) ctx.names -> Context b
-fromAll [<] [<] = [<]
-fromAll (ctx :< (n :- _)) (sx :< x) = fromAll ctx sx :< (n :- x)
+fromAll : {sx : SnocList String} -> All (Assoc0 a) sx -> Context a
+fromAll [<] = [<]
+fromAll {sx = sx :< n} (ctx :< (_ :- x)) = fromAll ctx :< (n :- x)
 
 export
-fromAllNames :
-  (ctx : Context a) -> (sx : All (const b) ctx.names) ->
-  (fromAll ctx sx).names = ctx.names
-fromAllNames [<] [<] = Refl
-fromAllNames (ctx :< (n :- _)) (sx :< x) = cong (:< n) $ fromAllNames ctx sx
+fromAllNames : {sx : SnocList String} -> (ctx : All (Assoc0 a) sx) -> (fromAll ctx).names = sx
+fromAllNames [<] = Refl
+fromAllNames {sx = sx :< n} (ctx :< (k :- x)) = cong (:< n) $ fromAllNames ctx

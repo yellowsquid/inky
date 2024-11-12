@@ -15,7 +15,6 @@ import Data.These
 import Data.Vect
 
 import Decidable.Equality
-import Inky.Data.Irrelevant
 
 public export
 When : Type -> Bool -> Type
@@ -38,23 +37,6 @@ public export
 toDec : Dec' a -> Dec a
 toDec (True `Because` prf) = Yes prf
 toDec (False `Because` contra) = No contra
-
--- So
-
-public export
-decSo : (b : Bool) -> Dec' (So b)
-decSo b = b `Because` (if b then Oh else absurd)
-
--- Irrelevant
-
-public export
-forgetWhen : {b : Bool} -> a `When` b -> Irrelevant a `When` b
-forgetWhen {b = True} prf = Forget prf
-forgetWhen {b = False} contra = \prf => void $ contra $ prf.value
-
-public export
-(.forget) : Dec' a -> Dec' (Irrelevant a)
-p.forget = p.does `Because` forgetWhen p.reason
 
 -- Negation
 

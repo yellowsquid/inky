@@ -110,24 +110,24 @@ thinTyBranchesNames f (ts :< (l :- (x ** t))) = cong (:< l) $ thinTyBranchesName
 
 public export
 Env : Mode -> Type -> SnocList String -> SnocList String -> SnocList String -> Type
-Env mode m tyCtx ctx1 ctx2 = All (const $ Either (Var ctx2) (Term mode m tyCtx ctx2)) ctx1
+Env mode m tyCtx ctx1 ctx2 = All (Assoc0 $ Either (Var ctx2) (Term mode m tyCtx ctx2)) ctx1
 
 public export
 Env' : Mode -> Type -> SnocList String -> List String -> SnocList String -> Type
-Env' mode m tyCtx ctx1 ctx2 = All (const $ Either (Var ctx2) (Term mode m tyCtx ctx2)) ctx1
+Env' mode m tyCtx ctx1 ctx2 = All (Assoc0 $ Either (Var ctx2) (Term mode m tyCtx ctx2)) ctx1
 
 public export
 thinEnv :
   ctx2 `Thins` ctx3 ->
   Env mode m tyCtx ctx1 ctx2 ->
   Env mode m tyCtx ctx1 ctx3
-thinEnv f = mapProperty (bimap (index f) (thin $ f))
+thinEnv f = mapProperty (map $ bimap (index f) (thin $ f))
 
 public export
 lift :
   Env mode m tyCtx ctx1 ctx2 ->
   Env mode m tyCtx (ctx1 :< x) (ctx2 :< x)
-lift f = thinEnv (Drop Id) f :< Left (%% x)
+lift f = thinEnv (Drop Id) f :< (x :- Left (%% x))
 
 public export
 sub :
@@ -160,12 +160,12 @@ keepBound :
   forall ctx. {0 bound : List String} ->
   LengthOf bound -> Env' mode m tyCtx bound (ctx <>< bound)
 keepBound Z = []
-keepBound (S len) = Left (index (dropFish Id len) (toVar Here)) :: keepBound len
+keepBound (S len) = (_ :- Left (index (dropFish Id len) (toVar Here))) :: keepBound len
 
 sub f (Annot meta t a) = Annot meta (sub f t) a
-sub f (Var meta i) = either (Var meta) id $ indexAll i.pos f
+sub f (Var meta i) = either (Var meta) id (indexAll i.pos f).value
 sub f (Let meta e (x ** t)) = Let meta (sub f e) (x ** sub (lift f) t)
-sub f (LetTy meta a (x ** t)) = LetTy meta a (x ** sub (mapProperty (map $ thinTy (Drop Id)) f) t)
+sub f (LetTy meta a (x ** t)) = LetTy meta a (x ** sub (mapProperty (map $ map $ thinTy (Drop Id)) f) t)
 sub f (Abs meta (bound ** t)) =
   let len = lengthOf bound in
   Abs meta (bound ** sub (thinEnv (dropFish Id len) f <>< keepBound len) t)

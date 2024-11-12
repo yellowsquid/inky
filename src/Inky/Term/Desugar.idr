@@ -80,89 +80,6 @@ desugarMapCaseNames [<] [<] i [<] f = Refl
 desugarMapCaseNames (as :< (l :- a)) (fresh :< freshIn) i (prfs :< prf) f =
   cong (:< l) $ desugarMapCaseNames as fresh i prfs f
 
--- -- Well Formed
-
--- desugarMapChecks :
---   (0 meta : m) =>
---   (a : Ty (tyCtx :< arg ++ bound)) -> (len : LengthOf bound) ->
---   (0 prf : index (dropAll len) (toVar {sx = tyCtx :< arg} Here) `StrictlyPositiveIn` a) ->
---   {env1 : All (const $ Thinned Ty [<]) tyCtx} ->
---   {env2 : All (const $ Thinned Ty [<]) bound} ->
---   {b, c : Ty [<]} ->
---   Synths tyEnv tmEnv f (TArrow b c) ->
---   Synths tyEnv tmEnv t (sub (((:<) {x = arg} env1 (b `Over` Id)) ++ env2) a) ->
---   SynthsOnly t ->
---   Checks tyEnv tmEnv
---     (sub (((:<) {x = arg} env1 (c `Over` Id)) ++ env2) a)
---     (desugarMap {m} a (index (dropAll len) (toVar {sx = tyCtx :< arg} Here)) prf f t)
--- desugarMapTupleChecks :
---   (0 meta : m) =>
---   (as : Context (Ty (tyCtx :< arg ++ bound))) -> (len' : LengthOf bs) ->
---   (0 fresh' : AllFresh (as <>< bs).names) ->
---   (0 fresh : AllFresh as.names) ->
---   (len : LengthOf bound) ->
---   (0 prfs : index (dropAll len) (toVar {sx = tyCtx :< arg} Here) `StrictlyPositiveInAll` as) ->
---   {env1 : All (const $ Thinned Ty [<]) tyCtx} ->
---   {env2 : All (const $ Thinned Ty [<]) bound} ->
---   {b, c : Ty [<]} ->
---   Synths tyEnv tmEnv f (TArrow b c) ->
---   Synths tyEnv tmEnv t
---     (sub (((:<) {x = arg} env1 (b `Over` Id)) ++ env2) (TProd (MkRow (as <>< bs) fresh'))) ->
---   SynthsOnly t ->
---   AllChecks tyEnv tmEnv
---     (subAll (((:<) {x = arg} env1 (c `Over` Id)) ++ env2) as)
---     (desugarMapTuple {m} as fresh (index (dropAll len) (toVar {sx = tyCtx :< arg} Here)) prfs f t).context
--- desugarMapCaseBranches :
---   (0 meta : m) =>
---   (as : Context (Ty (tyCtx :< arg ++ bound))) -> (len' : LengthOf bs) ->
---   (0 fresh' : AllFresh (as <>< bs).names) ->
---   (0 fresh : AllFresh as.names) ->
---   (len : LengthOf bound) ->
---   (0 prfs : index (dropAll len) (toVar {sx = tyCtx :< arg} Here) `StrictlyPositiveInAll` as) ->
---   {env1 : All (const $ Thinned Ty [<]) tyCtx} ->
---   {env2 : All (const $ Thinned Ty [<]) bound} ->
---   {b, c : Ty [<]} ->
---   Synths tyEnv tmEnv f (TArrow b c) ->
---   AllBranches tyEnv tmEnv
---     (subAll (((:<) {x = arg} env1 (b `Over` Id)) ++ env2) as)
---     (sub (((:<) {x = arg} env1 (c `Over` Id)) ++ env2) (TSum (MkRow (as <>< bs) fresh')))
---     (desugarMapCase {m} as fresh (index (dropAll len) (toVar {sx = tyCtx :< arg} Here)) prfs f).context
-
--- desugarMapChecks (TVar j) len TVar fun arg argSynOnly
---   with (index (dropAll len) (toVar Here) `decEq` j)
---   desugarMapChecks (TVar _) len TVar fun arg argSynOnly | True `Because` Refl =
---     EmbedC App (AppS fun [EmbedC argSynOnly arg $ alphaSym $ alphaRefl b _ $ ?b]) ?c
---   _ | False `Because` neq =
---     EmbedC argSynOnly arg $ alphaSym $ alphaRefl _ _ ?a
--- desugarMapChecks (TArrow a b) len (TArrow prf) fun arg argSynOnly =
---   EmbedC argSynOnly arg $ ?dmc_2
--- desugarMapChecks (TProd (MkRow as fresh)) len (TProd prfs) fun arg argSynOnly =
---   TupC (desugarMapTupleChecks as Z fresh fresh len prfs fun arg argSynOnly)
--- desugarMapChecks (TSum (MkRow as fresh)) len (TSum prfs) fun arg argSynOnly =
---   CaseC arg (desugarMapCaseBranches as Z fresh fresh len prfs fun)
--- desugarMapChecks (TFix x a) len (TFix prf) fun arg' argSynOnly =
---   let
---     x =
---   -- FoldC arg' (RollC $
---     desugarMapChecks
---       { m
---       , meta
---       , tyCtx
---       , arg
---       , bound = bound :< x
---       , env1
---       , env2 = env2 :< ?dmc_90
---       , b
---       , c
---       , tyEnv
---       , tmEnv = tmEnv :< (?dmc_92 `Over` Id)
---       , f = thin (Drop Id) f
---       , t = Var meta ((%%) "_eta" {pos = Here})
---       }
---       a (S len) prf ?x ?y ?z
---   -- Need assoc. of subst
---   in FoldC arg' (RollC ?dmc_99)
-
 -- Desugar Terms ---------------------------------------------------------------
 
 desugarSynths :
@@ -225,8 +142,8 @@ desugarSynths (MapS {meta, x, a, b, c} (TFix prf1 wf1) wf2 wf3) =
     (Abs meta
       (["_fun", "_arg"] ** desugarMap a (%% x) prf1 (Var meta (%% "_fun")) (Var meta (%% "_arg"))))
     (TArrow (TArrow (TArrow b c)
-      (sub (tabulate len ((`Over` Id) . TVar . toVar) :< (b `Over` Id)) a))
-      (sub (tabulate len ((`Over` Id) . TVar . toVar) :< (c `Over` Id)) a))
+      (sub (tabulate len (\i => _ :- TVar (toVar i)) :< (x :- b)) a))
+      (sub (tabulate len (\i => _ :- TVar (toVar i)) :< (x :- c)) a))
 
 desugarChecks (AnnotC prf1 prf2) = desugarSynths prf1
 desugarChecks (VarC prf1 prf2) = desugarSynths prf1
@@ -277,11 +194,11 @@ maybeDesugarList :
 maybeDesugarAll :
   (len : LengthOf tyCtx) =>
   (ts : Context (Term Sugar m tyCtx tmCtx)) ->
-  Maybe (All (const $ Term NoSugar m tyCtx tmCtx) ts.names)
+  Maybe (All (Assoc0 $ Term NoSugar m tyCtx tmCtx) ts.names)
 maybeDesugarBranches :
   (len : LengthOf tyCtx) =>
   (ts : Context (x ** Term Sugar m tyCtx (tmCtx :< x))) ->
-  Maybe (All (const $ (x ** Term NoSugar m tyCtx (tmCtx :< x))) ts.names)
+  Maybe (All (Assoc0 $ (x ** Term NoSugar m tyCtx (tmCtx :< x))) ts.names)
 
 maybeDesugar (Annot meta t a) = do
   t <- maybeDesugar t
@@ -302,8 +219,8 @@ maybeDesugar (App meta e ts) = do
   ts <- maybeDesugarList ts
   pure (App meta e ts)
 maybeDesugar (Tup meta (MkRow ts fresh)) = do
-  ts' <- maybeDesugarAll ts
-  pure (Tup meta (fromAll (MkRow ts fresh) ts'))
+  ts <- maybeDesugarAll ts
+  pure (Tup meta (fromAll ts fresh))
 maybeDesugar (Prj meta e l) = do
   e <- maybeDesugar e
   pure (Prj meta e l)
@@ -312,8 +229,8 @@ maybeDesugar (Inj meta l t) = do
   pure (Inj meta l t)
 maybeDesugar (Case meta e (MkRow ts fresh)) = do
   e <- maybeDesugar e
-  ts' <- maybeDesugarBranches ts
-  pure (Case meta e (fromAll (MkRow ts fresh) ts'))
+  ts <- maybeDesugarBranches ts
+  pure (Case meta e (fromAll ts fresh))
 maybeDesugar (Roll meta t) = do
   t <- maybeDesugar t
   pure (Roll meta t)
@@ -333,17 +250,20 @@ maybeDesugar (Map meta (x ** a) b c) =
         (Abs meta
           (["_fun", "_arg"] ** desugarMap a (%% x) prf (Var meta (%% "_fun")) (Var meta (%% "_arg"))))
         (TArrow (TArrow (TArrow b c)
-          (sub (tabulate len ((`Over` Id) . TVar . toVar) :< (b `Over` Id)) a))
-          (sub (tabulate len ((`Over` Id) . TVar . toVar) :< (c `Over` Id)) a))
+          (sub (tabulate len (\i => _ :- TVar (toVar i)) :< (x :- b)) a))
+          (sub (tabulate len (\i => _ :- TVar (toVar i)) :< (x :- c)) a))
 
 maybeDesugarList [] = pure []
 maybeDesugarList (t :: ts) = [| maybeDesugar t :: maybeDesugarList ts |]
 
 maybeDesugarAll [<] = pure [<]
-maybeDesugarAll (ts :< (l :- t)) = [| maybeDesugarAll ts :< maybeDesugar t |]
+maybeDesugarAll (ts :< (l :- t)) = do
+  ts <- maybeDesugarAll ts
+  t <- maybeDesugar t
+  pure (ts :< (l :- t))
 
 maybeDesugarBranches [<] = pure [<]
 maybeDesugarBranches (ts :< (l :- (x ** t))) = do
   ts <- maybeDesugarBranches ts
   t <- maybeDesugar t
-  pure (ts :< (x ** t))
+  pure (ts :< (l :- (x ** t)))

@@ -15,6 +15,18 @@ Functor Assoc where
 
 namespace Irrelevant
   public export
+  record Assoc0 (0 a : Type) (n : String) where
+    constructor (:-)
+    0 name : String
+    {auto 0 prf : n = name}
+    value : a
+
+  public export
+  map : (a -> b) -> Assoc0 a n -> Assoc0 b n
+  map f (n :- x) = n :- f x
+
+namespace Contexts
+  public export
   record Assoc0 (0 p : a -> Type) (x : Assoc a) where
     constructor (:-)
     0 name : String

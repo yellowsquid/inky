@@ -1,6 +1,5 @@
 module Inky.Term
 
-import public Inky.Data.Thinned
 import public Inky.Type
 
 import Data.List.Quantifiers
@@ -64,13 +63,13 @@ export
 public export
 data IsFunction :
   (bound : List String) -> (a : Ty tyCtx) ->
-  (dom : All (const $ Ty tyCtx) bound) -> (cod : Ty tyCtx) ->
+  (dom : All (Assoc0 $ Ty tyCtx) bound) -> (cod : Ty tyCtx) ->
   Type
   where
   Done : IsFunction [] a [] a
   Step :
     IsFunction bound b dom cod ->
-    IsFunction (x :: bound) (TArrow a b) (a :: dom) cod
+    IsFunction (x :: bound) (TArrow a b) ((x :- a) :: dom) cod
 
 public export
 data NotFunction : (bound : List String) -> (a : Ty tyCtx) -> Type
@@ -96,8 +95,8 @@ export
 isFunctionUnique :
   IsFunction bound a dom cod -> IsFunction bound a dom' cod' -> (dom = dom', cod = cod')
 isFunctionUnique Done Done = (Refl, Refl)
-isFunctionUnique (Step {a} prf) (Step prf') =
-  mapFst (\prf => cong (a ::) prf) $ isFunctionUnique prf prf'
+isFunctionUnique (Step {x, a} prf) (Step prf') =
+  mapFst (\prf => cong ((x :- a) ::) prf) $ isFunctionUnique prf prf'
 
 export
 isFunctionSplit : IsFunction bound a dom cod -> NotFunction bound a -> Void
@@ -107,13 +106,13 @@ isFunctionSplit (Step prf) (Step2 contra) = isFunctionSplit prf contra
 export
 isFunction :
   (bound : List String) -> (a : Ty tyCtx) ->
-  Proof (All (const $ Ty tyCtx) bound, Ty tyCtx)
+  Proof (All (Assoc0 $ Ty tyCtx) bound, Ty tyCtx)
     (uncurry $ IsFunction bound a)
     (NotFunction bound a)
 isFunction [] a = Just ([], a) `Because` Done
 isFunction (x :: bound) a =
   map
-    (\x => (fst (fst x) :: fst (snd x), snd (snd x)))
+    (\y => ((x :- fst (fst y)) :: fst (snd y), snd (snd y)))
     (\((a, b), (dom, cod)), (eq, prf) => rewrite eq in Step prf)
     (either Step1 false) $
   (ab := isArrow a) >=> isFunction bound (snd ab)
@@ -149,20 +148,20 @@ namespace Modes
 
 public export
 data Synths :
-  All (const $ Thinned Ty [<]) tyCtx ->
-  All (const $ Thinned Ty [<]) tmCtx ->
+  All (Assoc0 $ Ty [<]) tyCtx ->
+  All (Assoc0 $ Ty [<]) tmCtx ->
   Term mode m tyCtx tmCtx -> Ty [<] -> Type
 public export
 data Checks :
-  All (const $ Thinned Ty [<]) tyCtx ->
-  All (const $ Thinned Ty [<]) tmCtx ->
+  All (Assoc0 $ Ty [<]) tyCtx ->
+  All (Assoc0 $ Ty [<]) tmCtx ->
   Ty [<] -> Term mode m tyCtx tmCtx -> Type
 
 namespace Spine
   public export
   data CheckSpine :
-    All (const $ Thinned Ty [<]) tyCtx ->
-    All (const $ Thinned Ty [<]) tmCtx ->
+    All (Assoc0 $ Ty [<]) tyCtx ->
+    All (Assoc0 $ Ty [<]) tmCtx ->
     Ty [<] -> List (Term mode m tyCtx tmCtx) -> Ty [<] -> Type
     where
     Nil : CheckSpine tyEnv tmEnv a [] a
@@ -176,8 +175,8 @@ namespace Spine
 namespace Synths
   public export
   data AllSynths :
-    All (const $ Thinned Ty [<]) tyCtx ->
-    All (const $ Thinned Ty [<]) tmCtx ->
+    All (Assoc0 $ Ty [<]) tyCtx ->
+    All (Assoc0 $ Ty [<]) tmCtx ->
     Context (Term mode m tyCtx tmCtx) -> Row (Ty [<]) -> Type
     where
     Lin : AllSynths tyEnv tmEnv [<] [<]
@@ -192,8 +191,8 @@ namespace Synths
 namespace Checks
   public export
   data AllChecks :
-    All (const $ Thinned Ty [<]) tyCtx ->
-    All (const $ Thinned Ty [<]) tmCtx ->
+    All (Assoc0 $ Ty [<]) tyCtx ->
+    All (Assoc0 $ Ty [<]) tmCtx ->
     Context (Ty [<]) -> Context (Term mode m tyCtx tmCtx) -> Type
     where
     Base : AllChecks tyEnv tmEnv [<] [<]
@@ -208,14 +207,14 @@ namespace Checks
 namespace Branches
   public export
   data AllBranches :
-    All (const $ Thinned Ty [<]) tyCtx ->
-    All (const $ Thinned Ty [<]) tmCtx ->
+    All (Assoc0 $ Ty [<]) tyCtx ->
+    All (Assoc0 $ Ty [<]) tmCtx ->
     Context (Ty [<]) -> Ty [<] -> Context (x ** Term mode m tyCtx (tmCtx :< x)) -> Type
     where
     Base : AllBranches tyEnv tmEnv [<] a [<]
     Step :
       (i : Elem (l :- a) as) ->
-      Checks tyEnv (tmEnv :< (a `Over` Id)) b t ->
+      Checks tyEnv (tmEnv :< (x :- a)) b t ->
       AllBranches tyEnv tmEnv (dropElem as i) b ts ->
       AllBranches tyEnv tmEnv as b (ts :< (l :- (x ** t)))
 
@@ -227,14 +226,14 @@ data Synths where
     Checks tyEnv tmEnv (sub tyEnv a) t ->
     Synths tyEnv tmEnv (Annot meta t a) (sub tyEnv a)
   VarS :
-    Synths tyEnv tmEnv (Var meta i) (indexAll i.pos tmEnv).extract
+    Synths tyEnv tmEnv (Var meta i) (indexAll i.pos tmEnv).value
   LetS :
     Synths tyEnv tmEnv e a ->
-    Synths tyEnv (tmEnv :< (a `Over` Id)) f b ->
+    Synths tyEnv (tmEnv :< (x :- a)) f b ->
     Synths tyEnv tmEnv (Let meta e (x ** f)) b
   LetTyS :
     WellFormed a ->
-    Synths (tyEnv :< (sub tyEnv a `Over` Id)) tmEnv e b ->
+    Synths (tyEnv :< (x :- sub tyEnv a)) tmEnv e b ->
     Synths tyEnv tmEnv (LetTy meta a (x ** e)) b
   AppS :
     Synths tyEnv tmEnv f a ->
@@ -249,15 +248,15 @@ data Synths where
     Synths tyEnv tmEnv (Prj meta e l) a
   UnrollS :
     Synths tyEnv tmEnv e (TFix x a) ->
-    Synths tyEnv tmEnv (Unroll meta e) (sub [<TFix x a `Over` Id] a)
+    Synths tyEnv tmEnv (Unroll meta e) (sub [<x :- TFix x a] a)
   MapS :
     WellFormed (TFix x a) ->
     WellFormed b ->
     WellFormed c ->
     Synths tyEnv tmEnv (Map meta (x ** a) b c)
       (TArrow (TArrow (sub tyEnv b) (sub tyEnv c))
-      (TArrow (sub (tyEnv :< (sub tyEnv b `Over` Id)) a)
-              (sub (tyEnv :< (sub tyEnv c `Over` Id)) a)))
+      (TArrow (sub (tyEnv :< (x :- sub tyEnv b)) a)
+              (sub (tyEnv :< (x :- sub tyEnv c)) a)))
 
 data Checks where
   AnnotC :
@@ -270,15 +269,15 @@ data Checks where
     Checks tyEnv tmEnv b (Var {mode} meta i)
   LetC :
     Synths tyEnv tmEnv e a ->
-    Checks tyEnv (tmEnv :< (a `Over` Id)) b t ->
+    Checks tyEnv (tmEnv :< (x :- a)) b t ->
     Checks tyEnv tmEnv b (Let meta e (x ** t))
   LetTyC :
     WellFormed a ->
-    Checks (tyEnv :< (sub tyEnv a `Over` Id)) tmEnv b t ->
+    Checks (tyEnv :< (x :- sub tyEnv a)) tmEnv b t ->
     Checks tyEnv tmEnv b (LetTy meta a (x ** t))
   AbsC :
     IsFunction bound a dom cod ->
-    Checks tyEnv (tmEnv <>< mapProperty (`Over` Id) dom) cod t ->
+    Checks tyEnv (tmEnv <>< dom) cod t ->
     Checks tyEnv tmEnv a (Abs meta (bound ** t))
   AppC :
     Synths tyEnv tmEnv (App meta e ts) a ->
@@ -300,7 +299,7 @@ data Checks where
     AllBranches tyEnv tmEnv as.context a ts.context ->
     Checks tyEnv tmEnv a (Case meta e ts)
   RollC :
-    Checks tyEnv tmEnv (sub [<TFix x a `Over` Id] a) t ->
+    Checks tyEnv tmEnv (sub [<x :- TFix x a] a) t ->
     Checks tyEnv tmEnv (TFix x a) (Roll meta t)
   UnrollC :
     Synths tyEnv tmEnv (Unroll meta e) a ->
@@ -308,7 +307,7 @@ data Checks where
     Checks tyEnv tmEnv b (Unroll meta e)
   FoldC :
     Synths tyEnv tmEnv e (TFix x a) ->
-    Checks tyEnv (tmEnv :< (sub [<b `Over` Id] a `Over` Id)) b t ->
+    Checks tyEnv (tmEnv :< (y :- sub [<x :- b] a)) b t ->
     Checks tyEnv tmEnv b (Fold meta e (y ** t))
   MapC :
     Synths tyEnv tmEnv (Map meta (x ** a) b c) d ->
@@ -334,20 +333,20 @@ EmbedC Map prf1 prf2 = MapC prf1 prf2
 
 public export
 data NotSynths :
-  All (const $ Thinned Ty [<]) tyCtx ->
-  All (const $ Thinned Ty [<]) tmCtx ->
+  All (Assoc0 $ Ty [<]) tyCtx ->
+  All (Assoc0 $ Ty [<]) tmCtx ->
   Term mode m tyCtx tmCtx -> Type
 public export
 data NotChecks :
-  All (const $ Thinned Ty [<]) tyCtx ->
-  All (const $ Thinned Ty [<]) tmCtx ->
+  All (Assoc0 $ Ty [<]) tyCtx ->
+  All (Assoc0 $ Ty [<]) tmCtx ->
   Ty [<] -> Term mode m tyCtx tmCtx -> Type
 
 namespace Spine
   public export
   data NotCheckSpine :
-    All (const $ Thinned Ty [<]) tyCtx ->
-    All (const $ Thinned Ty [<]) tmCtx ->
+    All (Assoc0 $ Ty [<]) tyCtx ->
+    All (Assoc0 $ Ty [<]) tmCtx ->
     Ty [<] -> List (Term mode m tyCtx tmCtx) -> Type
     where
     Step1 :
@@ -362,8 +361,8 @@ namespace Spine
 namespace Synths
   public export
   data AnyNotSynths :
-    All (const $ Thinned Ty [<]) tyCtx ->
-    All (const $ Thinned Ty [<]) tmCtx ->
+    All (Assoc0 $ Ty [<]) tyCtx ->
+    All (Assoc0 $ Ty [<]) tmCtx ->
     (ts : Context (Term mode m tyCtx tmCtx)) -> Type
     where
     Step :
@@ -375,8 +374,8 @@ namespace Synths
 namespace Checks
   public export
   data AnyNotChecks :
-    All (const $ Thinned Ty [<]) tyCtx ->
-    All (const $ Thinned Ty [<]) tmCtx ->
+    All (Assoc0 $ Ty [<]) tyCtx ->
+    All (Assoc0 $ Ty [<]) tmCtx ->
     Context (Ty [<]) -> Context (Term mode m tyCtx tmCtx) -> Type
     where
     Base1 : AnyNotChecks tyEnv tmEnv (as :< la) [<]
@@ -393,8 +392,8 @@ namespace Checks
 namespace Branches
   public export
   data AnyNotBranches :
-    All (const $ Thinned Ty [<]) tyCtx ->
-    All (const $ Thinned Ty [<]) tmCtx ->
+    All (Assoc0 $ Ty [<]) tyCtx ->
+    All (Assoc0 $ Ty [<]) tmCtx ->
     Context (Ty [<]) -> Ty [<] -> Context (x ** Term mode m tyCtx (tmCtx :< x)) -> Type
     where
     Base1 : AnyNotBranches tyEnv tmEnv (as :< a) b [<]
@@ -404,7 +403,7 @@ namespace Branches
     Step2 :
       (i : Elem (l :- a) as) ->
       These
-        (NotChecks tyEnv (tmEnv :< (a `Over` Id)) b t)
+        (NotChecks tyEnv (tmEnv :< (x :- a)) b t)
         (AnyNotBranches tyEnv tmEnv (dropElem as i) b ts) ->
       AnyNotBranches tyEnv tmEnv as b (ts :< (l :- (x ** t)))
 
@@ -422,10 +421,10 @@ data NotSynths where
     NotSynths tyEnv tmEnv (Let meta e (x ** f))
   LetNS2 :
     Synths tyEnv tmEnv e a ->
-    NotSynths tyEnv (tmEnv :< (a `Over` Id)) f ->
+    NotSynths tyEnv (tmEnv :< (x :- a)) f ->
     NotSynths tyEnv tmEnv (Let meta e (x ** f))
   LetTyNS :
-    These (IllFormed a) (NotSynths (tyEnv :< (sub tyEnv a `Over` Id)) tmEnv e) ->
+    These (IllFormed a) (NotSynths (tyEnv :< (x :- sub tyEnv a)) tmEnv e) ->
     NotSynths tyEnv tmEnv (LetTy meta a (x ** e))
   AppNS1 :
     NotSynths tyEnv tmEnv f ->
@@ -474,17 +473,17 @@ data NotChecks where
     NotChecks tyEnv tmEnv b (Let meta e (x ** t))
   LetNC2 :
     Synths tyEnv tmEnv e a ->
-    NotChecks tyEnv (tmEnv :< (a `Over` Id)) b t ->
+    NotChecks tyEnv (tmEnv :< (x :- a)) b t ->
     NotChecks tyEnv tmEnv b (Let meta e (x ** t))
   LetTyNC :
-    These (IllFormed a) (NotChecks (tyEnv :< (sub tyEnv a `Over` Id)) tmEnv b t) ->
+    These (IllFormed a) (NotChecks (tyEnv :< (x :- sub tyEnv a)) tmEnv b t) ->
     NotChecks tyEnv tmEnv b (LetTy meta a (x ** t))
   AbsNC1 :
     NotFunction bound a ->
     NotChecks tyEnv tmEnv a (Abs meta (bound ** t))
   AbsNC2 :
     IsFunction bound a dom cod ->
-    NotChecks tyEnv (tmEnv <>< mapProperty (`Over` Id) dom) cod t ->
+    NotChecks tyEnv (tmEnv <>< dom) cod t ->
     NotChecks tyEnv tmEnv a (Abs meta (bound ** t))
   TupNC1 :
     ((as : Row (Ty [<])) -> Not (a = TProd as)) ->
@@ -517,7 +516,7 @@ data NotChecks where
     ((x : String) -> (b : Ty [<x]) -> Not (a = TFix x b)) ->
     NotChecks tyEnv tmEnv a (Roll meta t)
   RollNC2 :
-    NotChecks tyEnv tmEnv (sub [<TFix x a `Over` Id] a) t ->
+    NotChecks tyEnv tmEnv (sub [<x :- TFix x a] a) t ->
     NotChecks tyEnv tmEnv (TFix x a) (Roll meta t)
   FoldNC1 :
     NotSynths tyEnv tmEnv e ->
@@ -528,7 +527,7 @@ data NotChecks where
     NotChecks tyEnv tmEnv b (Fold meta e (y ** t))
   FoldNC3 :
     Synths tyEnv tmEnv e (TFix x a) ->
-    NotChecks tyEnv (tmEnv :< (sub [<b `Over` Id] a `Over` Id)) b t ->
+    NotChecks tyEnv (tmEnv :< (y :- sub [<x :- b] a)) b t ->
     NotChecks tyEnv tmEnv b (Fold meta e (y ** t))
 
 %name NotSynths contra

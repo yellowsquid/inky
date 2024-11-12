@@ -69,7 +69,7 @@ synthsUnique (PrjS {as} prf i) (PrjS {as = bs} prf' j) =
   let j = rewrite inj TProd $ synthsUnique prf prf' in j in
   cong fst $ lookupUnique as i j
 synthsUnique (UnrollS {x, a} prf) (UnrollS {x = y, a = b} prf') =
-  cong (\(x ** a) => sub [<TFix x a `Over` Id] a) $
+  cong (\(x ** a) => sub [<x :- TFix x a] a) $
   fixInjective $
   synthsUnique prf prf'
 synthsUnique (MapS _ _ _) (MapS _ _ _) = Refl
@@ -176,11 +176,11 @@ checksSplit (RollC prf) (RollNC2 contra) = checksSplit prf contra
 checksSplit (FoldC prf1 prf2) (FoldNC1 contra) = synthsSplit prf1 contra
 checksSplit (FoldC {x, a} prf1 prf2) (FoldNC2 prf1' contra) =
   void $ contra x a $ synthsUnique prf1' prf1
-checksSplit (FoldC {t, b} prf1 prf2) (FoldNC3 prf1' contra) =
+checksSplit (FoldC {y, t, b} prf1 prf2) (FoldNC3 prf1' contra) =
   let
     contra =
       replace
-        {p = \(x ** a) => NotChecks tyEnv (tmEnv :< (sub [<b `Over` Id] a `Over` Id)) b t}
+        {p = \(x ** a) => NotChecks tyEnv (tmEnv :< (y :- sub [<x :- b] a)) b t}
         (fixInjective $ synthsUnique prf1' prf1)
         contra
   in
@@ -212,7 +212,7 @@ allBranchesSplit fresh (Step {as, b, x, t, ts} i prf prfs) (Step2 j contras) =
       replace
         {p = \(a ** i) =>
           These
-            (NotChecks tyEnv (tmEnv :< (a `Over` Id)) b t)
+            (NotChecks tyEnv (tmEnv :< (x :- a)) b t)
             (AnyNotBranches tyEnv tmEnv (dropElem as i) b ts)}
         (lookupUnique (MkRow as fresh) j i)
         contras
@@ -234,37 +234,37 @@ fallbackCheck prf p a =
   (b := p) >=> alpha b a
 
 synths :
-  (tyEnv : All (const $ Thinned Ty [<]) tyCtx) ->
-  (tmEnv : All (const $ Thinned Ty [<]) tmCtx) ->
+  (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
+  (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
   (e : Term mode m tyCtx tmCtx) ->
   Proof (Ty [<]) (Synths tyEnv tmEnv e) (NotSynths tyEnv tmEnv e)
 export
 checks :
-  (tyEnv : All (const $ Thinned Ty [<]) tyCtx) ->
-  (tmEnv : All (const $ Thinned Ty [<]) tmCtx) ->
+  (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
+  (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
   (a : Ty [<]) -> (t : Term mode m tyCtx tmCtx) ->
   LazyEither (Checks tyEnv tmEnv a t) (NotChecks tyEnv tmEnv a t)
 checkSpine :
-  (tyEnv : All (const $ Thinned Ty [<]) tyCtx) ->
-  (tmEnv : All (const $ Thinned Ty [<]) tmCtx) ->
+  (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
+  (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
   (a : Ty [<]) -> (ts : List (Term mode m tyCtx tmCtx)) ->
   Proof (Ty [<]) (CheckSpine tyEnv tmEnv a ts) (NotCheckSpine tyEnv tmEnv a ts)
 allSynths :
-  (tyEnv : All (const $ Thinned Ty [<]) tyCtx) ->
-  (tmEnv : All (const $ Thinned Ty [<]) tmCtx) ->
+  (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
+  (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
   (es : Context (Term mode m tyCtx tmCtx)) ->
   (0 fresh : AllFresh es.names) ->
   Proof (Subset (Row (Ty [<])) (\as => es.names = as.names))
     (AllSynths tyEnv tmEnv es . Subset.fst)
     (AnyNotSynths tyEnv tmEnv es)
 allChecks :
-  (tyEnv : All (const $ Thinned Ty [<]) tyCtx) ->
-  (tmEnv : All (const $ Thinned Ty [<]) tmCtx) ->
+  (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
+  (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
   (as : Context (Ty [<])) -> (ts : Context (Term mode m tyCtx tmCtx)) ->
   LazyEither (AllChecks tyEnv tmEnv as ts) (AnyNotChecks tyEnv tmEnv as ts)
 allBranches :
-  (tyEnv : All (const $ Thinned Ty [<]) tyCtx) ->
-  (tmEnv : All (const $ Thinned Ty [<]) tmCtx) ->
+  (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
+  (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
   (as : Context (Ty [<])) -> (a : Ty [<]) -> (ts : Context (x ** Term mode m tyCtx (tmCtx :< x))) ->
   LazyEither (AllBranches tyEnv tmEnv as a ts) (AnyNotBranches tyEnv tmEnv as a ts)
 
@@ -272,15 +272,15 @@ synths tyEnv tmEnv (Annot _ t a) =
   pure (sub tyEnv a) $
   map (uncurry AnnotS) AnnotNS $
   all (wellFormed a) (checks tyEnv tmEnv (sub tyEnv a) t)
-synths tyEnv tmEnv (Var _ i) = Just (indexAll i.pos tmEnv).extract `Because` VarS
+synths tyEnv tmEnv (Var _ i) = Just (indexAll i.pos tmEnv).value `Because` VarS
 synths tyEnv tmEnv (Let _ e (x ** f)) =
   map snd
     (\(_, _), (prf1, prf2) => LetS prf1 prf2)
     (either LetNS1 (\xPrfs => uncurry LetNS2 (snd xPrfs))) $
-  (a := synths tyEnv tmEnv e) >=> synths tyEnv (tmEnv :< (a `Over` Id)) f
+  (a := synths tyEnv tmEnv e) >=> synths tyEnv (tmEnv :< (x :- a)) f
 synths tyEnv tmEnv (LetTy _ a (x ** e)) =
   map id (\_, (wf, prf) => LetTyS wf prf) LetTyNS $
-  all (wellFormed a) (synths (tyEnv :< (sub tyEnv a `Over` Id)) tmEnv e)
+  all (wellFormed a) (synths (tyEnv :< (x :- sub tyEnv a)) tmEnv e)
 synths tyEnv tmEnv (Abs _ (bound ** t)) = Nothing `Because` ChecksNS Abs
 synths tyEnv tmEnv (App _ e ts) =
   map snd
@@ -321,7 +321,7 @@ synths tyEnv tmEnv (Unroll _ e) =
   synths tyEnv tmEnv e `andThen` isFix
   where
   f : (Ty [<], (x ** Ty [<x])) -> Ty [<]
-  f (a, (x ** b)) = sub [<TFix x b `Over` Id] b
+  f (a, (x ** b)) = sub [<x :- TFix x b] b
 
   true :
     (axb : _) ->
@@ -348,19 +348,19 @@ checks tyEnv tmEnv a (Let _ e (x ** t)) =
   map
     (\(_ ** (prf1, prf2)) => LetC prf1 prf2)
     (either LetNC1 (\xPrfs => uncurry LetNC2 $ snd xPrfs)) $
-  (b := synths tyEnv tmEnv e) >=> checks tyEnv (tmEnv :< (b `Over` Id)) a t
+  (b := synths tyEnv tmEnv e) >=> checks tyEnv (tmEnv :< (x :- b)) a t
 checks tyEnv tmEnv a (LetTy _ b (x ** t)) =
   map (uncurry LetTyC) LetTyNC $
-  all (wellFormed b) (checks (tyEnv :< (sub tyEnv b `Over` Id)) tmEnv a t)
+  all (wellFormed b) (checks (tyEnv :< (x :- sub tyEnv b)) tmEnv a t)
 checks tyEnv tmEnv a (Abs meta (bound ** t)) =
   map
     (\((_, _) ** (prf1, prf2)) => AbsC prf1 prf2)
     (either AbsNC1 false) $
   (domCod := isFunction bound a) >=>
-  checks tyEnv (tmEnv <>< mapProperty (`Over` Id) (fst domCod)) (snd domCod) t
+  checks tyEnv (tmEnv <>< fst domCod) (snd domCod) t
   where
   false :
-    (x ** (Prelude.uncurry (IsFunction bound a) x, NotChecks tyEnv (tmEnv <>< mapProperty (`Over` Id) (fst x)) (snd x) t)) ->
+    (x ** (Prelude.uncurry (IsFunction bound a) x, NotChecks tyEnv (tmEnv <>< fst x) (snd x) t)) ->
     NotChecks tyEnv tmEnv a (Abs meta (bound ** t))
   false ((_,_) ** prf) = uncurry AbsNC2 prf
 checks tyEnv tmEnv a (App meta f ts) = fallbackCheck App (synths tyEnv tmEnv $ App meta f ts) a
@@ -436,7 +436,7 @@ checks tyEnv tmEnv a (Roll _ t) =
   (xb := isFix a) >=> checks tyEnv tmEnv (ty xb) t
   where
   ty : (x ** Ty [<x]) -> Ty [<]
-  ty (x ** b) = sub [<TFix x b `Over` Id] b
+  ty (x ** b) = sub [<x :- TFix x b] b
 
   true :
     forall a.
@@ -459,8 +459,8 @@ checks tyEnv tmEnv a (Fold _ e (x ** t)) =
   (yc := isFix b) >=>
   checks tyEnv (tmEnv' yc) a t
   where
-  tmEnv' : (y ** Ty [<y]) -> All (const $ Thinned Ty [<]) (tmCtx :< x)
-  tmEnv' (y ** c) = tmEnv :< (sub [<a `Over` Id] c `Over` Id)
+  tmEnv' : (y ** Ty [<y]) -> All (Assoc0 $ Ty [<]) (tmCtx :< x)
+  tmEnv' (y ** c) = tmEnv :< (x :- sub [<y :- a] c)
 
   true :
     (b ** (Synths tyEnv tmEnv e b,
@@ -534,5 +534,5 @@ allBranches tyEnv tmEnv as b (ts :< (l :- (x ** t))) =
     (either Step1 (\xPrf => Step2 (snd $ fst xPrf) (snd xPrf))) $
   (ai := (decLookup l as).forget) >=>
   all
-    (checks tyEnv (tmEnv :< (fst ai `Over` Id)) b t)
+    (checks tyEnv (tmEnv :< (x :- fst ai)) b t)
     (allBranches tyEnv tmEnv (dropElem as $ snd ai) b ts)

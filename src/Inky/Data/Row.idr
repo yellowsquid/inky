@@ -5,7 +5,6 @@ import public Inky.Data.Context
 import public Inky.Data.SnocList.Quantifiers
 
 import Inky.Data.SnocList.Elem
-import Inky.Data.Irrelevant
 import Inky.Decidable
 
 public export
@@ -77,8 +76,8 @@ snocCong :
 snocCong eq1 eq2 = rowCong $ cong2 (\x, y => x.context :< y) eq1 eq2
 
 public export
-fromAll : (row : Row a) -> All (const b) row.names -> Row b
-fromAll row sx = MkRow (fromAll row.context sx) (rewrite fromAllNames row.context sx in row.fresh)
+fromAll : {sx : SnocList String} -> (ctx : All (Assoc0 b) sx) -> (0 fresh : AllFresh sx) -> Row b
+fromAll ctx fresh = MkRow (fromAll ctx) (rewrite fromAllNames ctx in fresh)
 
 -- Interfaces ------------------------------------------------------------------
 
@@ -114,16 +113,14 @@ export
 isFresh :
   (names : SnocList String) ->
   (name : String) ->
-  Dec' (Irrelevant $ name `FreshIn` names)
-isFresh names name =
-  map irrelevant (\contra, prfs => anyNegAll contra $ relevant names prfs.value) $
-  all (\x => (decSo $ x /= name).forget) names
+  LazyEither (name `FreshIn` names) (Any (\x => So (x == name)) names)
+isFresh names name = all (\x => not (so $ x == name)) names
 
 export
 extend : Row a -> Assoc a -> Maybe (Row a)
-extend row x with (isFresh row.names x.name)
-  _ | True `Because` Forget prf = Just (row :< x)
-  _ | False `Because` _ = Nothing
+extend row x = case (isFresh row.names x.name) of
+  True `Because` prf => Just ((:<) row x @{prf})
+  False `Because` _ => Nothing
 
 -- Search ----------------------------------------------------------------------
 

@@ -15,7 +15,6 @@ modules
   , Inky.Data.Context
   , Inky.Data.Context.Var
   , Inky.Data.Fun
-  , Inky.Data.Irrelevant
   , Inky.Data.List
   , Inky.Data.Row
   , Inky.Data.SnocList

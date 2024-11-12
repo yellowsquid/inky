@@ -1,5 +1,6 @@
 module Inky.Decidable.Either
 
+import Data.So
 import Data.These
 
 public export
@@ -87,6 +88,10 @@ all p q = p.does && q.does `Because` Union.all p.reason q.reason
 public export
 any : LazyEither a b -> Lazy (LazyEither c d) -> LazyEither (These a c) (b, d)
 any p q = p.does || q.does `Because` Union.any p.reason q.reason
+
+public export
+so : (b : Bool) -> LazyEither (So b) (So $ not b)
+so b = b `Because` if b then Oh else Oh
 
 export autobind infixr 0 >=>
 

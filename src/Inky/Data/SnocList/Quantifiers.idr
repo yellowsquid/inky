@@ -3,7 +3,6 @@ module Inky.Data.SnocList.Quantifiers
 import public Data.SnocList.Quantifiers
 
 import Data.List.Quantifiers
-import Inky.Data.Irrelevant
 import Inky.Data.SnocList
 import Inky.Data.SnocList.Elem
 import Inky.Decidable
@@ -26,21 +25,13 @@ HSnocList : SnocList Type -> Type
 HSnocList = All id
 
 public export
-all : ((x : a) -> Dec' (p x)) -> (sx : SnocList a) -> LazyEither (All p sx) (Any (Not . p) sx)
+all :
+  ((x : a) -> LazyEither (p x) (q x)) ->
+  (sx : SnocList a) -> LazyEither (All p sx) (Any q sx)
 all f [<] = True `Because` [<]
 all f (sx :< x) =
   map (\prfs => snd prfs :< fst prfs) (either Here There) $
   both (f x) (all f sx)
-
-public export
-irrelevant : {0 sx : SnocList a} -> All (Irrelevant . p) sx -> Irrelevant (All p sx)
-irrelevant [<] = Forget [<]
-irrelevant (prfs :< px) = [| irrelevant prfs :< px |]
-
-public export
-relevant : (sx : SnocList a) -> (0 prfs : All p sx) -> All (Irrelevant . p) sx
-relevant [<] _ = [<]
-relevant (sx :< x) prfs = relevant sx (tail prfs) :< Forget (head prfs)
 
 public export
 tabulate : LengthOf sx -> (forall x. Elem x sx -> p x) -> All p sx

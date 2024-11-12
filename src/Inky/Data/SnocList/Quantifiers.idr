@@ -4,6 +4,8 @@ import public Data.SnocList.Quantifiers
 
 import Data.List.Quantifiers
 import Inky.Data.Irrelevant
+import Inky.Data.SnocList
+import Inky.Data.SnocList.Elem
 import Inky.Decidable
 
 public export
@@ -39,6 +41,11 @@ public export
 relevant : (sx : SnocList a) -> (0 prfs : All p sx) -> All (Irrelevant . p) sx
 relevant [<] _ = [<]
 relevant (sx :< x) prfs = relevant sx (tail prfs) :< Forget (head prfs)
+
+public export
+tabulate : LengthOf sx -> (forall x. Elem x sx -> p x) -> All p sx
+tabulate Z f = [<]
+tabulate (S len) f = tabulate len (f . There) :< f Here
 
 public export
 data Pairwise : (a -> a -> Type) -> SnocList a -> Type where

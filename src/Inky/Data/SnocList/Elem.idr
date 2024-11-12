@@ -8,6 +8,7 @@ import Data.Singleton
 import Inky.Decidable
 import Inky.Decidable.Maybe
 import Inky.Data.Assoc
+import Inky.Data.List
 import Inky.Data.SnocList
 
 export
@@ -70,6 +71,11 @@ split : LengthOf sy -> Elem x (sx ++ sy) -> Either (Elem x sx) (Elem x sy)
 split Z pos = Left pos
 split (S len) Here = Right Here
 split (S len) (There pos) = mapSnd There $ split len pos
+
+public export
+wknL' : Elem x sx -> LengthOf xs -> Elem x (sx <>< xs)
+wknL' i Z = i
+wknL' i (S len) = wknL' (There i) len
 
 -- Lookup ----------------------------------------------------------------------
 

@@ -38,7 +38,6 @@ data InkyKind
   | List
   | Suc
   | Map
-  | GetChildren
   | ParenOpen
   | ParenClose
   | BracketOpen
@@ -75,7 +74,6 @@ export
   List == List = True
   Suc == Suc = True
   Map == Map = True
-  GetChildren == GetChildren = True
   ParenOpen == ParenOpen = True
   ParenClose == ParenClose = True
   BracketOpen == BracketOpen = True
@@ -113,7 +111,6 @@ Interpolation InkyKind where
   interpolate List = "'List'"
   interpolate Suc = "'suc'"
   interpolate Map = "'map'"
-  interpolate GetChildren = "'getChildren'"
   interpolate ParenOpen = "'('"
   interpolate ParenClose = "')'"
   interpolate BracketOpen = "'['"
@@ -154,7 +151,6 @@ TokenKind InkyKind where
   tokValue List = const ()
   tokValue Suc = const ()
   tokValue Map = const ()
-  tokValue GetChildren = const ()
   tokValue ParenOpen = const ()
   tokValue ParenClose = const ()
   tokValue BracketOpen = const ()
@@ -188,7 +184,6 @@ keywords =
   , ("List", List)
   , ("suc", Suc)
   , ("map", Map)
-  , ("getChildren", GetChildren)
   ]
 
 export
@@ -281,7 +276,7 @@ TypeFun = ParseFun 1 Ty
 
 public export
 TermFun : Type
-TermFun = ParseFun 2 (Term Bounds)
+TermFun = ParseFun 2 (Term Sugar Bounds)
 
 public export
 TypeParser : SnocList String -> SnocList String -> Type
@@ -431,7 +426,7 @@ AppTerm =
       , weaken (S Z) SuffixTerm
       ]
     , mkApp <$> Seq
-      [ OneOf {nils = [False, False, False]}
+      [ OneOf
         [ WithBounds SuffixTerm
         , mkMap <$> Seq
           [ WithBounds (match Map)
@@ -442,16 +437,6 @@ AppTerm =
             , rename Id (Drop Id) OpenType
             ]
           , sub [<"openType" :- rename Id (Drop Id) OpenType] [<] AtomType
-          , sub [<"openType" :- rename Id (Drop Id) OpenType] [<] AtomType
-          ]
-        , mkGetChildren <$> Seq
-          [ WithBounds (match GetChildren)
-          , enclose (match ParenOpen) (match ParenClose) $ Seq
-            [ match Backslash
-            , match TypeIdent
-            , match DoubleArrow
-            , rename Id (Drop Id) OpenType
-            ]
           , sub [<"openType" :- rename Id (Drop Id) OpenType] [<] AtomType
           ]
         ]
@@ -466,12 +451,6 @@ AppTerm =
   mkMap [m, [_, x, _, a], b, c] =
     MkParseFun (\tyCtx, tmCtx =>
       pure $ Map m.bounds (x ** !(a.try (tyCtx :< x))) !(b.try tyCtx) !(c.try tyCtx))
-    <$ m
-
-  mkGetChildren : HList [WithBounds (), HList [_, String, _, TypeFun], TypeFun] -> WithBounds TermFun
-  mkGetChildren [m, [_, x, _, a], b] =
-    MkParseFun (\tyCtx, tmCtx =>
-      pure $ GetChildren m.bounds (x ** !(a.try (tyCtx :< x))) !(b.try tyCtx))
     <$ m
 
   mkApp : HList [WithBounds TermFun, List TermFun] -> TermFun
@@ -600,7 +579,7 @@ CaseTerm =
 
   mkBranch :
     HList [String, String, (), TermFun] ->
-    Assoc (ParseFun 2 $ \tyCtx, tmCtx => (x ** Term Bounds tyCtx (tmCtx :< x)))
+    Assoc (ParseFun 2 $ \tyCtx, tmCtx => (x ** Term Sugar Bounds tyCtx (tmCtx :< x)))
   mkBranch [tag, bound, _, branch] =
     tag :- MkParseFun (\tyCtx, tmCtx => pure (bound ** !(branch.try tyCtx (tmCtx :< bound))))
 

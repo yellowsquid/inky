@@ -2,6 +2,7 @@ module Inky.Data.SnocList.Thinning
 
 import Data.DPair
 import Data.Nat
+import Inky.Data.List
 import Inky.Data.SnocList
 import Inky.Data.SnocList.Var
 import Inky.Data.SnocList.Quantifiers
@@ -95,6 +96,16 @@ export
 prf.index ((%%) n {pos}) = irrelevantEq $ toVarCong $ toNatInjective $ prf.indexPos pos
 
 -- Useful for Parsers ----------------------------------------------------------
+
+public export
+(<><) : ctx1 `Thins` ctx2 -> LengthOf bound -> ctx1 <>< bound `Thins` ctx2 <>< bound
+f <>< Z = f
+f <>< S len = Keep f <>< len
+
+public export
+dropFish : ctx1 `Thins` ctx2 -> LengthOf bound -> ctx1 `Thins` ctx2 <>< bound
+dropFish f Z = f
+dropFish f (S len) = dropFish (Drop f) len
 
 public export
 dropPos : (pos : Elem x ctx) -> dropElem ctx pos `Thins` ctx

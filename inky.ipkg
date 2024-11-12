@@ -16,6 +16,7 @@ modules
   , Inky.Data.Context.Var
   , Inky.Data.Fun
   , Inky.Data.Irrelevant
+  , Inky.Data.List
   , Inky.Data.Row
   , Inky.Data.SnocList
   , Inky.Data.SnocList.Elem
@@ -28,7 +29,11 @@ modules
   , Inky.Decidable.Maybe
   , Inky.Parser
   , Inky.Term
+  , Inky.Term.Checks
+  , Inky.Term.Desugar
   , Inky.Term.Parser
   , Inky.Term.Pretty
+  , Inky.Term.Pretty.Error
+  , Inky.Term.Substitution
   , Inky.Type
   , Inky.Type.Pretty

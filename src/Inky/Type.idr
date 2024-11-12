@@ -372,6 +372,66 @@ allAlphaRefl [<] .([<]) Refl = Base
 allAlphaRefl (as :< (l :- a)) .(as :< (l :- a)) Refl =
   Step Here (alphaRefl a a Refl) (allAlphaRefl as as Refl)
 
+namespace Sym
+  data AllAlpha' : Context (Ty ctx1) -> Context (Ty ctx2) -> Type where
+    Base : AllAlpha' [<] [<]
+    Step :
+      {0 as : Context (Ty ctx1)} -> {0 bs : Context (Ty ctx2)} ->
+      (i : Elem (l :- a) as) -> (j : Elem (l :- b) bs) ->
+      Alpha a b ->
+      AllAlpha' (dropElem as i) (dropElem bs j) ->
+      AllAlpha' as bs
+
+  %name AllAlpha' prfs
+
+  pinch :
+    (i : Elem x sx) -> (j : Elem y (dropElem sx i)) ->
+    Elem x (dropElem sx (indexPos (dropPos i) j))
+  pinch Here j = Here
+  pinch (There i) Here = i
+  pinch (There i) (There j) = There (pinch i j)
+
+  dropPinch :
+    (i : Elem x sx) -> (j : Elem y (dropElem sx i)) ->
+    dropElem (dropElem sx i) j = dropElem (dropElem sx $ indexPos (dropPos i) j) (pinch i j)
+  dropPinch Here j = Refl
+  dropPinch (There i) Here = Refl
+  dropPinch {sx = _ :< y} (There i) (There j) = cong (:< y) $ dropPinch i j
+
+  toStep :
+    AllAlpha' (as :< (l :- a)) bs ->
+    Exists (\b => (i : Elem (l :- b) bs ** (Alpha a b, AllAlpha' as (dropElem bs i))))
+  toStep (Step Here j prf prfs) = Evidence _ (j ** (prf, prfs))
+  toStep (Step {b = b'} (There i) j prf prfs) =
+    let Evidence b (k ** (prf', prfs)) = toStep prfs in
+    Evidence b
+      (indexPos (dropPos j) k **
+        (prf', Step i (pinch j k) prf (rewrite sym $ dropPinch j k in prfs)))
+
+  elemIsSnoc : Elem x sx -> NonEmpty sx
+  elemIsSnoc Here = IsSnoc
+  elemIsSnoc (There _) = IsSnoc
+
+  toAll : AllAlpha' as bs -> AllAlpha as bs
+  toAll Base = Base
+  toAll (Step i j prf prfs) with (elemIsSnoc i)
+    toAll {as = as :< (l :- a)} (Step i j prf prfs) | IsSnoc =
+      let Evidence b (k ** (prf, prfs)) = toStep (Step i j prf prfs) in
+      Step k prf (toAll prfs)
+
+  export
+  alphaSym : Alpha a b -> Alpha b a
+  allAlphaSym : AllAlpha as bs -> AllAlpha' bs as
+
+  alphaSym (TVar prf) = TVar (sym prf)
+  alphaSym (TArrow prf1 prf2) = TArrow (alphaSym prf1) (alphaSym prf2)
+  alphaSym (TProd prfs) = TProd (toAll $ allAlphaSym prfs)
+  alphaSym (TSum prfs) = TSum (toAll $ allAlphaSym prfs)
+  alphaSym (TFix prf) = TFix (alphaSym prf)
+
+  allAlphaSym Base = Base
+  allAlphaSym (Step i prf prfs) = Step i Here (alphaSym prf) (allAlphaSym prfs)
+
 export
 alphaSplit :
   {0 a : Ty ctx1} -> {0 b : Ty ctx2} ->
@@ -739,9 +799,11 @@ allWellFormed (as :< (n :- a)) =
 -- Substitution ----------------------------------------------------------------
 --------------------------------------------------------------------------------
 
-export
+public export
 sub : All (const $ Thinned Ty ctx2) ctx1 -> Ty ctx1 -> Ty ctx2
+public export
 subAll : All (const $ Thinned Ty ctx2) ctx1 -> Context (Ty ctx1) -> Context (Ty ctx2)
+public export
 subAllNames :
   (f : All (const $ Thinned Ty ctx2) ctx1) ->
   (ctx : Context (Ty ctx1)) ->

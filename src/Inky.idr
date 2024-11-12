@@ -10,8 +10,11 @@ import Inky.Decidable
 import Inky.Decidable.Maybe
 import Inky.Parser
 import Inky.Term
+import Inky.Term.Checks
+import Inky.Term.Desugar
 import Inky.Term.Parser
 import Inky.Term.Pretty
+import Inky.Term.Pretty.Error
 import Inky.Type.Pretty
 
 import System.File.Mode
@@ -43,7 +46,7 @@ parseType toks = do
     | Left msg => throw msg
   pure a
 
-parseTerm : HasErr String es => List (WithBounds InkyToken) -> App es (Term Bounds [<] [<])
+parseTerm : HasErr String es => List (WithBounds InkyToken) -> App es (Term Sugar Bounds [<] [<])
 parseTerm toks = do
   let Ok res [] _ = parse @{EqI} OpenTerm toks
     | Ok res (x :: _) _ => throw "\{x.bounds}: unexpected token \{x.val.kind}, expected end of input"
@@ -58,7 +61,7 @@ checkType a = do
     | False `Because` bad => throw "type ill-formed"
   pure ()
 
-checkTerm : (a : Ty [<]) -> (t : Term m [<] [<]) -> HasErr (NotChecks [<] [<] a t) es => App es ()
+checkTerm : (a : Ty [<]) -> (t : Term mode m [<] [<]) -> HasErr (NotChecks [<] [<] a t) es => App es ()
 checkTerm a t = do
   let True `Because` prf = checks [<] [<] a t
     | False `Because` contra => throw contra
@@ -72,13 +75,13 @@ printType a = do
 
 printTerm :
   PrimIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
-  Term m [<] [<] -> App es ()
+  Term mode m [<] [<] -> App es ()
 printTerm a = do
   primIO $ renderIO $ layoutSmart opts $ prettyTerm a Open
 
 printCheckError :
   PrimIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
-  {a : Ty [<]} -> {t : Term Bounds [<] [<]} ->
+  {a : Ty [<]} -> {t : Term mode Bounds [<] [<]} ->
   NotChecks [<] [<] a t -> App es ()
 printCheckError contra =
   primIO $ renderIO $ layoutSmart opts $
@@ -118,7 +121,12 @@ Inky = MkCommand
         """
       , subcommands =
         [ "type" ::= basic "print a type" filePath
-        , "term" ::= basic "print a term" filePath
+        , "term" ::= MkCommand
+          { description = "print a term"
+          , subcommands = []
+          , modifiers = ["--desugar" ::= flag "desugar the term"]
+          , arguments = filePath
+          }
         ]
       , modifiers = []
       , arguments = none
@@ -187,8 +195,13 @@ main = run {l = MayThrow} $ do
           txt <- handle {err = IOError} (readFileOrStdin path) pure (abortErr . show)
           toks <- handle {err = String} (lexInkyString txt) pure abortErr
           t <- handle {err = String} (parseTerm toks) pure abortErr
-          printTerm t
-          pure ()
+          let [noSugar] = cmd.modifiers.content
+          case noSugar of
+            True => do
+              let Just t = maybeDesugar t
+                | Nothing => abortErr "failed to desugar term"
+              printTerm t
+            False => printTerm t
         ]
       ]
     , "check" ::=

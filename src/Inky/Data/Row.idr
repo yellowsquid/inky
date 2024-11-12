@@ -28,20 +28,6 @@ public export
 (.names) : Row a -> SnocList String
 row.names = row.context.names
 
--- Interfaces ------------------------------------------------------------------
-
-public export
-Functor Row where
-  map f row = MkRow (map (map f) row.context) (rewrite mapNames f row.context in row.fresh)
-
-public export
-Foldable Row where
-  foldr f x row = foldr (\x, y => f x.value y) x row.context
-  foldl f x row = foldl (\x, y => f x y.value) x row.context
-  null row = null row.context
-  foldlM f x row = foldlM (\x, y => f x y.value) x row.context
-  foldMap f row = foldMap (f . value) row.context
-
 -- Equality --------------------------------------------------------------------
 
 export
@@ -81,9 +67,46 @@ public export
   Row a
 row :< x = MkRow (row.context :< x) (row.fresh :< fresh)
 
+export
+snocCong :
+  {0 x, y : Assoc a} ->
+  row1 = row2 -> x = y ->
+  {0 fresh1 : x.name `FreshIn` row1.names} ->
+  {0 fresh2 : y.name `FreshIn` row2.names} ->
+  (:<) row1 x @{fresh1} = (:<) row2 y @{fresh2}
+snocCong eq1 eq2 = rowCong $ cong2 (\x, y => x.context :< y) eq1 eq2
+
 public export
 fromAll : (row : Row a) -> All (const b) row.names -> Row b
 fromAll row sx = MkRow (fromAll row.context sx) (rewrite fromAllNames row.context sx in row.fresh)
+
+-- Interfaces ------------------------------------------------------------------
+
+public export
+mapRow : (a -> b) -> (ctx : Context a) -> (0 fresh : AllFresh ctx.names) -> Row b
+export
+mapRowNames :
+  (0 f : a -> b) -> (ctx : Context a) -> (0 fresh : AllFresh ctx.names) ->
+  (mapRow f ctx fresh).names = ctx.names
+
+mapRow f [<] [<] = [<]
+mapRow f (ctx :< (l :- x)) (prfs :< prf) =
+  (:<) (mapRow f ctx prfs) (l :- f x) @{rewrite mapRowNames f ctx prfs in prf}
+
+mapRowNames f [<] [<] = Refl
+mapRowNames f (ctx :< (l :- x)) (prfs :< prf) = cong (:< l) $ mapRowNames f ctx prfs
+
+public export
+Functor Row where
+  map f row = mapRow f row.context row.fresh
+
+public export
+Foldable Row where
+  foldr f x row = foldr (\x, y => f x.value y) x row.context
+  foldl f x row = foldl (\x, y => f x y.value) x row.context
+  null row = null row.context
+  foldlM f x row = foldlM (\x, y => f x y.value) x row.context
+  foldMap f row = foldMap (f . value) row.context
 
 -- Operations ------------------------------------------------------------------
 

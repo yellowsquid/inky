@@ -1,11 +1,12 @@
 module Inky.Data.Row
 
 import public Data.So
-import public Inky.Data.Context
-import public Inky.Data.SnocList.Quantifiers
+import public Flap.Data.Context
+import public Flap.Data.SnocList.Quantifiers
 
-import Inky.Data.SnocList.Elem
-import Inky.Decidable
+import Data.Singleton
+import Flap.Data.SnocList.Elem
+import Flap.Decidable
 
 public export
 FreshIn : String -> SnocList String -> Type
@@ -153,6 +154,33 @@ lookupUnique :
   (j : Elem (n :- y) row.context) ->
   the (x ** Elem (n :- x) row.context) (x ** i) = (y ** j)
 lookupUnique row i j = doLookupUnique row.context row.fresh i j
+
+notHere :
+  {0 ctx : Context a} ->
+  (i : Elem (n :- x) (ctx :< (l :- y))) ->
+  Not (n = l) -> (j : Elem (n :- x) ctx ** i = There j)
+notHere Here neq = void $ neq Refl
+notHere (There i) _ = (i ** Refl)
+
+doLookupRecompute :
+  (ctx : Context a) -> (0 fresh : AllFresh ctx.names) ->
+  {n : String} -> (0 i : Elem (n :- x) ctx) -> Singleton i
+doLookupRecompute [<] [<] i = void $ absurd i
+doLookupRecompute (ctx :< (l :- x)) (fresh :< freshIn) i with (decEq n l)
+  doLookupRecompute (ctx :< (l :- x)) (fresh :< freshIn) i | True `Because` Refl =
+    replace {p = \x => Singleton x.snd}
+      (doLookupUnique (ctx :< (l :- x)) (fresh :< freshIn) Here i)
+      (Val Here)
+  _ | False `Because` contra =
+    let 0 jeq = notHere i contra in
+    rewrite snd jeq in
+    [| There $ doLookupRecompute ctx fresh (fst jeq) |]
+
+export
+lookupRecompute :
+  (row : Row a) -> {n : String} ->
+  (0 i : Elem (n :- x) row.context) -> Singleton i
+lookupRecompute row i = doLookupRecompute row.context row.fresh i
 
 -- Removal ---------------------------------------------------------------------
 

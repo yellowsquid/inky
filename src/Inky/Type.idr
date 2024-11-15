@@ -1,17 +1,17 @@
 module Inky.Type
 
-import public Inky.Data.Context.Var
+import public Flap.Data.Context.Var
+import public Flap.Data.SnocList.Var
 import public Inky.Data.Row
-import public Inky.Data.SnocList.Var
 import public Inky.Data.Thinned
 
 import Control.Function
 import Data.DPair
 import Data.These
 
-import Inky.Data.SnocList.Thinning
-import Inky.Decidable
-import Inky.Decidable.Maybe
+import Flap.Data.SnocList.Thinning
+import Flap.Decidable
+import Flap.Decidable.Maybe
 
 %hide Prelude.Ops.infixl.(>=>)
 
@@ -191,11 +191,29 @@ thinId (TFix x a) = cong (TFix x) (trans (thinCong (KeepId IdId) a) (thinId a))
 thinIdAll [<] = Refl
 thinIdAll (as :< (n :- a)) = cong2 (:<) (thinIdAll as) (cong (n :-) $ thinId a)
 
-export
+thinHomo :
+  (f : ctx2 `Thins` ctx3) -> (g : ctx1 `Thins` ctx2) -> (a : Ty ctx1) ->
+  thin f (thin g a) = thin (f . g) a
+thinHomoAll :
+  (f : ctx2 `Thins` ctx3) -> (g : ctx1 `Thins` ctx2) -> (as : Context (Ty ctx1)) ->
+  thinAll f (thinAll g as) = thinAll (f . g) as
+
+thinHomo f g (TVar i) = cong (TVar . toVar) $ sym $ indexPosComp f g i.pos
+thinHomo f g (TArrow a b) = cong2 TArrow (thinHomo f g a) (thinHomo f g b)
+thinHomo f g (TProd (MkRow as fresh)) = cong TProd $ rowCong $ thinHomoAll f g as
+thinHomo f g (TSum (MkRow as fresh)) = cong TSum $ rowCong $ thinHomoAll f g as
+thinHomo f g (TFix x a) = cong (TFix x) $ thinHomo (Keep f) (Keep g) a
+
+thinHomoAll f g [<] = Refl
+thinHomoAll f g (as :< (n :- a)) =
+  cong2 (:<) (thinHomoAll f g as) (cong (n :-) $ thinHomo f g a)
+
+public export
 Rename String Ty where
   rename = thin
   renameCong = thinCong
   renameId = thinId
+  renameHomo = thinHomo
 
 -- Alpha Equivalence ------------------------------------------------------------
 
@@ -521,14 +539,13 @@ namespace Strengthen
   data Strengthen : (i : Var ctx) -> Ty ctx -> Ty (dropElem ctx i.pos) -> Type
   public export
   data StrengthenAll :
-    (i : Var ctx) -> (as : Context (Ty ctx)) ->
-    All (Assoc0 $ Ty $ dropElem ctx i.pos) as.names -> Type
+    (i : Var ctx) -> Context (Ty ctx) -> Context (Ty $ dropElem ctx i.pos) -> Type
 
   data Strengthen where
     TVar : (j = index (dropPos i.pos) k) -> Strengthen i (TVar j) (TVar k)
     TArrow : Strengthen i a c -> Strengthen i b d -> Strengthen i (TArrow a b) (TArrow c d)
-    TProd : StrengthenAll i as.context bs -> Strengthen i (TProd as) (TProd $ fromAll bs as.fresh)
-    TSum : StrengthenAll i as.context bs -> Strengthen i (TSum as) (TSum $ fromAll bs as.fresh)
+    TProd : StrengthenAll i as.context bs.context -> Strengthen i (TProd as) (TProd bs)
+    TSum : StrengthenAll i as.context bs.context -> Strengthen i (TSum as) (TSum bs)
     TFix : Strengthen (ThereVar i) a b -> Strengthen i (TFix x a) (TFix x b)
 
   data StrengthenAll where
@@ -538,13 +555,20 @@ namespace Strengthen
   %name Strengthen prf
   %name StrengthenAll prfs
 
+export
+strengthenAllNames : StrengthenAll i as bs -> bs.names = as.names
+strengthenAllNames [<] = Refl
+strengthenAllNames ((:<) prfs {l} prf) = cong (:< l) (strengthenAllNames prfs)
+
 strengthenEq : Strengthen i a b -> a = thin (dropPos i.pos) b
-strengthenAllEq : StrengthenAll i as bs -> as = thinAll (dropPos i.pos) (fromAll bs)
+strengthenAllEq : StrengthenAll i as bs -> as = thinAll (dropPos i.pos) bs
 
 strengthenEq (TVar prf) = cong TVar prf
 strengthenEq (TArrow prf1 prf2) = cong2 TArrow (strengthenEq prf1) (strengthenEq prf2)
-strengthenEq (TProd {as = MkRow _ _} prfs) = cong TProd $ rowCong $ strengthenAllEq prfs
-strengthenEq (TSum {as = MkRow _ _} prfs) = cong TSum $ rowCong $ strengthenAllEq prfs
+strengthenEq (TProd {as = MkRow _ _, bs = MkRow _ _} prfs) =
+  cong TProd $ rowCong $ strengthenAllEq prfs
+strengthenEq (TSum {as = MkRow _ _, bs = MkRow _ _} prfs) =
+  cong TSum $ rowCong $ strengthenAllEq prfs
 strengthenEq (TFix prf) = cong (TFix _) $ strengthenEq prf
 
 strengthenAllEq [<] = Refl
@@ -583,8 +607,8 @@ strengthenSplit (TVar Refl) (TVar {i = %% n} contra) = void $ lemma _ _ contra
   lemma :
     (i : Elem x sx) -> (j : Elem y (dropElem sx i)) ->
     Not (toVar i = toVar (indexPos (dropPos i) j))
-  lemma Here j prf = absurd (toVarInjective prf)
-  lemma (There i) Here prf = absurd (toVarInjective prf)
+  lemma Here j prf = absurd @{HereThere} (toVarInjective prf)
+  lemma (There i) Here prf = absurd @{ThereHere} (toVarInjective prf)
   lemma (There i) (There j) prf = lemma i j $ toVarCong $ thereInjective $ toVarInjective prf
 strengthenSplit (TArrow prf1 prf2) (TArrow contras) =
   these (strengthenSplit prf1) (strengthenSplit prf2) (const $ strengthenSplit prf2) contras
@@ -602,7 +626,9 @@ strengthen :
 export
 strengthenAll :
   (i : Var ctx) -> (as : Context (Ty ctx)) ->
-  Proof (All (Assoc0 $ Ty $ dropElem ctx i.pos) as.names) (StrengthenAll i as) (i `OccursInAny` as)
+  Proof (Subset (Context (Ty $ dropElem ctx i.pos)) (\bs => bs.names = as.names))
+    (StrengthenAll i as . Subset.fst)
+    (i `OccursInAny` as)
 
 strengthen ((%%) x {pos = i}) (TVar ((%%) y {pos = j})) =
   map (TVar . toVar)
@@ -613,18 +639,21 @@ strengthen i (TArrow a b) =
   map (uncurry TArrow) (\(c, d) => uncurry TArrow) TArrow $
   all (strengthen i a) (strengthen i b)
 strengthen i (TProd (MkRow as fresh)) =
-  map (\bs => TProd $ fromAll bs fresh) (\_ => TProd) TProd $
+  map (\bs => TProd $ MkRow (fst bs) (rewrite snd bs in fresh)) (\_ => TProd) TProd $
   strengthenAll i as
 strengthen i (TSum (MkRow as fresh)) =
-  map (\bs => TSum $ fromAll bs fresh) (\_ => TSum) TSum $
+  map (\bs => TSum $ MkRow (fst bs) (rewrite snd bs in fresh)) (\_ => TSum) TSum $
   strengthenAll i as
 strengthen i (TFix x a) =
   map (TFix x) (\_ => TFix) TFix $
   strengthen (ThereVar i) a
 
-strengthenAll i [<] = Just [<] `Because` [<]
+strengthenAll i [<] = Just (Element [<] Refl) `Because` [<]
 strengthenAll i (as :< (l :- a)) =
-  map (\x => snd x :< (l :- fst x)) (\(_, _) => uncurry (:<) . swap) (And . swap) $
+  map
+    (\x => Element (fst (snd x) :< (l :- fst x)) (cong (:< l) (snd $ snd x)))
+    (\(_, _) => uncurry (:<) . swap)
+    (And . swap) $
   all (strengthen i a) (strengthenAll i as)
 
 -- Not Strictly Positive -----------------------------------------------------------
@@ -677,6 +706,20 @@ Uninhabited (i `NotPositiveIn` TVar j) where
 export
 Uninhabited (i `NotPositiveInAny` [<]) where
   uninhabited (And contras) impossible
+
+export
+strongIsStrictlyPositive : Strengthen i a b -> i `StrictlyPositiveIn` a
+allStrongIsAllStrictlyPositive : StrengthenAll i as bs -> i `StrictlyPositiveInAll` as
+
+strongIsStrictlyPositive (TVar prf) = TVar
+strongIsStrictlyPositive (TArrow prf1 prf2) = TArrow (TArrow prf1 prf2)
+strongIsStrictlyPositive (TProd prfs) = TProd (allStrongIsAllStrictlyPositive prfs)
+strongIsStrictlyPositive (TSum prfs) = TSum (allStrongIsAllStrictlyPositive prfs)
+strongIsStrictlyPositive (TFix prf) = TFix (strongIsStrictlyPositive prf)
+
+allStrongIsAllStrictlyPositive [<] = [<]
+allStrongIsAllStrictlyPositive (prfs :< prf) =
+  allStrongIsAllStrictlyPositive prfs :< strongIsStrictlyPositive prf
 
 export
 strictlyPositiveSplit : i `StrictlyPositiveIn` a -> i `NotPositiveIn` a -> Void
@@ -806,8 +849,8 @@ subAll : All (Assoc0 $ Thinned Ty ctx2) ctx1 -> Context (Ty ctx1) -> Context (Ty
 public export
 subAllNames :
   (f : All (Assoc0 $ Thinned Ty ctx2) ctx1) ->
-  (ctx : Context (Ty ctx1)) ->
-  (subAll f ctx).names = ctx.names
+  (env : Context (Ty ctx1)) ->
+  (subAll f env).names = env.names
 
 sub' env (TVar i) = (indexAll i.pos env).value.extract
 sub' env (TArrow a b) = TArrow (sub' env a) (sub' env b)

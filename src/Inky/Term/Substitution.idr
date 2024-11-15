@@ -1,7 +1,7 @@
 module Inky.Term.Substitution
 
 import Data.List.Quantifiers
-import Inky.Data.List
+import Flap.Data.List
 import Inky.Term
 
 public export

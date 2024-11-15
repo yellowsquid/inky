@@ -1,6 +1,6 @@
 module Inky.Data.Thinned
 
-import public Inky.Data.SnocList.Thinning
+import public Flap.Data.SnocList.Thinning
 
 public export
 record Thinned (0 p : SnocList a -> Type) (ctx : SnocList a) where
@@ -11,8 +11,15 @@ record Thinned (0 p : SnocList a -> Type) (ctx : SnocList a) where
 
 public export
 rename : (ctx1 `Thins` ctx2) -> Thinned p ctx1 -> Thinned p ctx2
-rename f (value `Over` thins) = value `Over` (f . thins)
+rename f v = v.value `Over` (f . v.thins)
 
 public export
 (.extract) : Rename a p => Thinned p ctx -> p ctx
-(value `Over` thins).extract = rename thins value
+v.extract = rename v.thins v.value
+
+export
+0 extractHomo :
+  Rename a p =>
+  (f : ctx1 `Thins` ctx2) -> (x : Thinned p ctx1) ->
+  rename f x.extract = (rename f x).extract
+extractHomo f x = renameHomo f x.thins x.value

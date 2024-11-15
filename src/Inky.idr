@@ -6,11 +6,13 @@ import Control.App
 import Control.App.Console
 import Control.App.FileIO
 
-import Inky.Decidable
-import Inky.Decidable.Maybe
-import Inky.Parser
+import Flap.Decidable
+import Flap.Decidable.Maybe
+import Flap.Parser
+
 import Inky.Term
 import Inky.Term.Checks
+import Inky.Term.Compile
 import Inky.Term.Desugar
 import Inky.Term.Parser
 import Inky.Term.Pretty
@@ -28,6 +30,10 @@ import Text.PrettyPrint.Prettyprinter.Render.Terminal
 %default partial
 
 %hide Collie.Modifiers.infix.(::=)
+
+record Erased (a : Type) where
+  constructor Forget
+  0 value : a
 
 -- Actions ---------------------------------------------------------------------
 
@@ -55,17 +61,20 @@ parseTerm toks = do
     | Left msg => throw msg
   pure t
 
-checkType : HasErr String es => Ty [<] -> App es ()
+checkType : HasErr String es => (a : Ty [<]) -> App es (Erased $ WellFormed a)
 checkType a = do
   let True `Because` wf = wellFormed a
     | False `Because` bad => throw "type ill-formed"
-  pure ()
+  pure (Forget wf)
 
-checkTerm : (a : Ty [<]) -> (t : Term mode m [<] [<]) -> HasErr (NotChecks [<] [<] a t) es => App es ()
+checkTerm :
+  (a : Ty [<]) -> (t : Term mode m [<] [<]) ->
+  HasErr (NotChecks [<] [<] a t) es =>
+  App es (Erased $ Checks [<] [<] a t)
 checkTerm a t = do
   let True `Because` prf = checks [<] [<] a t
     | False `Because` contra => throw contra
-  pure ()
+  pure (Forget prf)
 
 printType :
   PrimIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
@@ -88,6 +97,18 @@ printCheckError contra =
   concatWith (surround hardline) $
   map (\(bounds, msg) => group $ align $ hang 2 $ pretty "\{bounds}:" <+> line <+> msg) $
   prettyNotChecks contra
+
+compileTerm :
+  PrimIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
+  {a : Ty [<]} ->
+  {t : Term mode m [<] [<]} ->
+  (0 wf : WellFormed a) ->
+  (0 prf : Checks [<] [<] a t) ->
+  App es ()
+compileTerm wf prf =
+  primIO $ renderIO $ layoutSmart opts $
+  pretty "(use-modules (ice-9 match))" <+> line <+>
+  parens (hang 1 $ pretty "define main" <+> line <+> group (compileChecks [<] [<] wf prf))
 
 readFile : FileIO es => File -> App es String
 readFile f = do
@@ -139,6 +160,21 @@ Inky = MkCommand
         [ "type" ::= basic "check a type" filePath
         , "term" ::= MkCommand
           { description = "check a term"
+          , subcommands = []
+          , modifiers = ["--type" ::= option "type to check against" filePath]
+          , arguments = filePath
+          }
+        ]
+      , modifiers = []
+      , arguments = none
+      }
+    , "compile" ::= MkCommand
+      { description = """
+        compile to scheme
+        """
+      , subcommands =
+        [ "term" ::= MkCommand
+          { description = "compile a term"
           , subcommands = []
           , modifiers = ["--type" ::= option "type to check against" filePath]
           , arguments = filePath
@@ -212,7 +248,7 @@ main = run {l = MayThrow} $ do
           txt <- handle {err = IOError} (readFileOrStdin path) pure (abortErr . show)
           toks <- handle {err = String} (lexInkyString txt) pure abortErr
           a <- handle {err = String} (parseType toks) pure abortErr
-          handle {err = String} (checkType a) pure abortErr
+          handle {err = String} (checkType a) (const $ pure ()) abortErr
         ]
       , "term" ::=
         [ \cmd => do
@@ -227,11 +263,36 @@ main = run {l = MayThrow} $ do
                 txt <- handle {err = IOError} (readFileOrStdin $ Just path) pure (abortErr . show)
                 toks <- handle {err = String} (lexInkyString txt) pure abortErr
                 a <- handle {err = String} (parseType toks) pure abortErr
-                handle {err = String} (checkType a) pure abortErr
+                handle {err = String} (checkType a) (const $ pure ()) abortErr
                 pure a)
               type
-          handle {err = NotChecks [<] [<] a t} (checkTerm a t) pure
+          handle {err = NotChecks [<] [<] a t} (checkTerm a t) (const $ pure ())
             (\contra => do printCheckError contra; primIO exitFailure)
+        ]
+      ]
+    , "compile" ::=
+      [ const showHelp
+      , "term" ::=
+        [ \cmd => do
+          let path = cmd.arguments
+          txt <- handle {err = IOError} (readFileOrStdin path) pure (abortErr . show)
+          toks <- handle {err = String} (lexInkyString txt) pure abortErr
+          t <- handle {err = String} (parseTerm toks) pure abortErr
+          let [type] = cmd.modifiers.content
+          Element a wf <-
+            the (App _ (Subset (Ty [<]) WellFormed)) $
+            maybe (pure (Element (TArrow TNat TNat) %search))
+              (\path => do
+                txt <- handle {err = IOError} (readFileOrStdin $ Just path) pure (abortErr . show)
+                toks <- handle {err = String} (lexInkyString txt) pure abortErr
+                a <- handle {err = String} (parseType toks) pure abortErr
+                Forget wf <- handle {err = String} (checkType a) pure abortErr
+                pure (Element a wf))
+              type
+          Forget prf <-
+            handle {err = NotChecks [<] [<] a t} (checkTerm a t) pure
+              (\contra => do printCheckError contra; primIO exitFailure)
+          compileTerm wf prf
         ]
       ]
     ]

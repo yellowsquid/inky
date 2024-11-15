@@ -4,35 +4,25 @@ sourcedir = "src"
 
 options = "--total"
 
-depends = collie, contrib
+depends = collie, contrib, flap
 
 executable = inky
 main = Inky
 
 modules
   = Inky
-  , Inky.Data.Assoc
-  , Inky.Data.Context
-  , Inky.Data.Context.Var
   , Inky.Data.Fun
-  , Inky.Data.List
   , Inky.Data.Row
-  , Inky.Data.SnocList
-  , Inky.Data.SnocList.Elem
-  , Inky.Data.SnocList.Quantifiers
-  , Inky.Data.SnocList.Thinning
-  , Inky.Data.SnocList.Var
   , Inky.Data.Thinned
-  , Inky.Decidable
-  , Inky.Decidable.Either
-  , Inky.Decidable.Maybe
-  , Inky.Parser
   , Inky.Term
   , Inky.Term.Checks
+  , Inky.Term.Compile
   , Inky.Term.Desugar
   , Inky.Term.Parser
   , Inky.Term.Pretty
   , Inky.Term.Pretty.Error
+  , Inky.Term.Recompute
   , Inky.Term.Substitution
   , Inky.Type
   , Inky.Type.Pretty
+  , Inky.Type.Substitution

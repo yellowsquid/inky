@@ -7,14 +7,15 @@ import Data.Nat
 import Data.List1
 import Data.String
 
-import Inky.Data.Context
-import Inky.Data.Context.Var
+import Flap.Data.Context
+import Flap.Data.Context.Var
+import Flap.Data.SnocList.Var
+import Flap.Data.SnocList.Thinning
+import Flap.Decidable
+import Flap.Decidable.Maybe
+import Flap.Parser
+
 import Inky.Data.Row
-import Inky.Data.SnocList.Var
-import Inky.Data.SnocList.Thinning
-import Inky.Decidable
-import Inky.Decidable.Maybe
-import Inky.Parser
 import Inky.Term
 import Inky.Type
 

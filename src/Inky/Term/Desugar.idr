@@ -2,8 +2,8 @@ module Inky.Term.Desugar
 
 import Data.List.Quantifiers
 import Data.Maybe
-import Inky.Data.List
-import Inky.Decidable
+import Flap.Data.List
+import Flap.Decidable
 import Inky.Term
 import Inky.Term.Substitution
 

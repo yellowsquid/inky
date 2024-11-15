@@ -1,7 +1,7 @@
 module Inky.Type.Pretty
 
 import Data.Singleton
-import Inky.Decidable
+import Flap.Decidable
 import Inky.Type
 import Text.PrettyPrint.Prettyprinter
 

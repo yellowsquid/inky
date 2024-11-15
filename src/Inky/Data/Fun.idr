@@ -1,7 +1,7 @@
 module Inky.Data.Fun
 
-import public Inky.Data.SnocList.Quantifiers
-import Inky.Data.SnocList
+import public Flap.Data.SnocList.Quantifiers
+import Flap.Data.SnocList
 
 public export
 Fun : SnocList Type -> Type -> Type

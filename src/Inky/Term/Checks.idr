@@ -5,48 +5,13 @@ import Data.DPair
 import Data.List.Quantifiers
 import Data.Singleton
 import Data.These
-import Inky.Data.SnocList.Quantifiers
-import Inky.Decidable
-import Inky.Decidable.Maybe
+import Flap.Data.SnocList.Quantifiers
+import Flap.Decidable
+import Flap.Decidable.Maybe
 import Inky.Term
+import Inky.Term.Recompute
 
 %hide Prelude.Ops.infixl.(>=>)
-
--- Can recompute type from synthesis proof
-
-export
-synthsRecompute :
-  {tyEnv : _} -> {tmEnv : _} -> {e : _} ->
-  Synths tyEnv tmEnv e a -> Singleton a
-checkSpineRecompute :
-  {tyEnv : _} -> {tmEnv : _} -> {a : _} ->
-  CheckSpine tyEnv tmEnv a ts b -> Singleton b
-allSynthsRecompute :
-  {tyEnv : _} -> {tmEnv : _} -> {es : Context _} ->
-  {0 as : Row (Ty [<])} ->
-  AllSynths tyEnv tmEnv es as -> Singleton as
-
-synthsRecompute (AnnotS wf prf) = Val _
-synthsRecompute VarS = Val _
-synthsRecompute (LetS prf1 prf2) with (synthsRecompute prf1)
-  _ | Val _ = synthsRecompute prf2
-synthsRecompute (LetTyS wf prf) = synthsRecompute prf
-synthsRecompute (AppS prf prfs) with (synthsRecompute prf)
-  _ | Val _ = checkSpineRecompute prfs
-synthsRecompute (TupS prfs) with (allSynthsRecompute prfs)
-  _ | Val _ = Val _
-synthsRecompute (PrjS prf i) with (synthsRecompute prf)
-  _ | Val _ = [| (nameOf i).value |]
-synthsRecompute (UnrollS prf) with (synthsRecompute prf)
-  _ | Val _ = Val _
-synthsRecompute (MapS f g h) = Val _
-
-checkSpineRecompute [] = Val _
-checkSpineRecompute (prf :: prfs) = checkSpineRecompute prfs
-
-allSynthsRecompute [<] = Val _
-allSynthsRecompute (prfs :< prf) with (allSynthsRecompute prfs) | (synthsRecompute prf)
-  _ | Val _ | Val _ = Val _
 
 -- Synthesis gives unique types
 

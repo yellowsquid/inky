@@ -5,9 +5,9 @@ import public Inky.Type
 import Data.List.Quantifiers
 import Data.Singleton
 import Data.These
-import Inky.Data.SnocList.Quantifiers
-import Inky.Decidable
-import Inky.Decidable.Maybe
+import Flap.Data.SnocList.Quantifiers
+import Flap.Decidable
+import Flap.Decidable.Maybe
 
 %hide Prelude.Ops.infixl.(>=>)
 
@@ -83,13 +83,6 @@ data NotFunction : (bound : List String) -> (a : Ty tyCtx) -> Type
 
 %name IsFunction prf
 %name NotFunction contra
-
-export
-isFunctionRecompute :
-  {a : Ty tyCtx} -> IsFunction bound a dom cod -> (Singleton dom, Singleton cod)
-isFunctionRecompute Done = (Val _, Val _)
-isFunctionRecompute (Step {a} prf) =
-  mapFst (\case Val _ => Val _) $ isFunctionRecompute prf
 
 export
 isFunctionUnique :

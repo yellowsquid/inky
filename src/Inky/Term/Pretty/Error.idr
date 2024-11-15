@@ -5,9 +5,10 @@ import Data.Singleton
 import Data.String
 import Data.These
 
-import Inky.Decidable.Maybe
+import Flap.Decidable.Maybe
+
 import Inky.Term
-import Inky.Term.Checks
+import Inky.Term.Recompute
 import Inky.Type.Pretty
 
 import Text.PrettyPrint.Prettyprinter

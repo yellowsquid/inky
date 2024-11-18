@@ -92,9 +92,10 @@ lessPrettyTerm (Annot _ t a) d =
     prettyTerm t App <+> line <+>
     ":" <++> prettyType a Open
 lessPrettyTerm (Var _ i) d = pretty (unVal $ nameOf i)
-lessPrettyTerm (Let _ (Annot _ (Abs _ (bound ** e)) a) (x ** t)) d =
+lessPrettyTerm (Let meta (Annot _ (Abs _ (bound ** e)) a) (x ** t)) d =
   let (binds, cod, rest) = groupBinds bound a in
   let binds = map (\x => parens (pretty x.name <++> ":" <++> prettyType x.value Open)) binds in
+  let doc = concatMap (enclose "--" hardline . pretty) meta.doc in
   group $ align $ parenthesise (d < Open) $
   prettyLet
     ( (group $ hang 2 $ flatAlt
@@ -107,7 +108,7 @@ lessPrettyTerm (Let _ (Annot _ (Abs _ (bound ** e)) a) (x ** t)) d =
       ( if null rest
         then neutral
         else neutral <++> "\\" <+> concatWith (surround $ "," <++> neutral) (map pretty rest) <++> "=>")
-      <+> line <+> prettyTerm e Open
+      <+> line <+> doc <+> prettyTerm e Open
     )
     (prettyTerm t Open)
   where
@@ -117,22 +118,25 @@ lessPrettyTerm (Let _ (Annot _ (Abs _ (bound ** e)) a) (x ** t)) d =
     let (binds, cod, rest) = groupBinds xs b in
     ((x :- a) :: binds, cod, rest)
   groupBinds xs a = ([], a, xs)
-lessPrettyTerm (Let _ (Annot _ e a) (x ** t)) d =
+lessPrettyTerm (Let meta (Annot _ e a) (x ** t)) d =
+  let doc = concatMap (enclose "--" hardline . pretty) meta.doc in
   group $ align $ parenthesise (d < Open) $
   prettyLet
     ( pretty x <++> ":" <++> prettyType a Open <++> "=" <+> line <+>
-      prettyTerm e Open
+      doc <+> prettyTerm e Open
     )
     (prettyTerm t Open)
-lessPrettyTerm (Let _ e (x ** t)) d =
+lessPrettyTerm (Let meta e (x ** t)) d =
+  let doc = concatMap (enclose "--" hardline . pretty) meta.doc in
   group $ align $ parenthesise (d < Open) $
   prettyLet
-    (pretty x <++> "=" <+> line <+> prettyTerm e Open)
+    (pretty x <++> "=" <+> line <+> doc <+> prettyTerm e Open)
     (prettyTerm t Open)
-lessPrettyTerm (LetTy _ a (x ** t)) d =
+lessPrettyTerm (LetTy meta a (x ** t)) d =
+  let doc = concatMap (enclose "--" hardline . pretty) meta.doc in
   group $ align $ parenthesise (d < Open) $
   prettyLet
-    (pretty x <++> "=" <+> line <+> prettyType a Open)
+    (pretty x <++> "=" <+> line <+> doc <+> prettyType a Open)
     (prettyTerm t Open)
 lessPrettyTerm (Abs _ (bound ** t)) d =
   group $ hang 2 $ parenthesise (d < Open) $

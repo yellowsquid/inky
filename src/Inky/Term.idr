@@ -19,11 +19,17 @@ public export
 data Mode = Sugar | NoSugar
 
 public export
+record WithDoc (a : Type) where
+  constructor AddDoc
+  value : a
+  doc : List String
+
+public export
 data Term : Mode -> (m : Type) -> (tyCtx, tmCtx : SnocList String) -> Type where
   Annot : (meta : m) -> Term mode m tyCtx tmCtx -> Ty tyCtx -> Term mode m tyCtx tmCtx
   Var : (meta : m) -> Var tmCtx -> Term mode m tyCtx tmCtx
-  Let : (meta : m) -> Term mode m tyCtx tmCtx -> (x ** Term mode m tyCtx (tmCtx :< x)) -> Term mode m tyCtx tmCtx
-  LetTy : (meta : m) -> Ty tyCtx -> (x ** Term mode m (tyCtx :< x) tmCtx) -> Term mode m tyCtx tmCtx
+  Let : (meta : WithDoc m) -> Term mode m tyCtx tmCtx -> (x ** Term mode m tyCtx (tmCtx :< x)) -> Term mode m tyCtx tmCtx
+  LetTy : (meta : WithDoc m) -> Ty tyCtx -> (x ** Term mode m (tyCtx :< x) tmCtx) -> Term mode m tyCtx tmCtx
   Abs : (meta : m) -> (bound ** Term mode m tyCtx (tmCtx <>< bound)) -> Term mode m tyCtx tmCtx
   App : (meta : m) -> Term mode m tyCtx tmCtx -> List (Term mode m tyCtx tmCtx) -> Term mode m tyCtx tmCtx
   Tup : (meta : m) -> Row (Term mode m tyCtx tmCtx) -> Term mode m tyCtx tmCtx
@@ -41,8 +47,8 @@ export
 (.meta) : Term mode m tyCtx tmCtx -> m
 (Annot meta _ _).meta = meta
 (Var meta _).meta = meta
-(Let meta _ _).meta = meta
-(LetTy meta _ _).meta = meta
+(Let meta _ _).meta = meta.value
+(LetTy meta _ _).meta = meta.value
 (Abs meta _).meta = meta
 (App meta _ _).meta = meta
 (Tup meta _).meta = meta

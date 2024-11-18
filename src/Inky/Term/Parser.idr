@@ -6,6 +6,7 @@ import Data.Either
 import Data.Nat
 import Data.List1
 import Data.String
+import Data.String.Extra
 
 import Flap.Data.Context
 import Flap.Data.Context.Var
@@ -58,6 +59,7 @@ data InkyKind
   | Equal
   | Comma
   | Ignore
+  | Comment
 
 export
 [EqI] Eq InkyKind where
@@ -94,6 +96,7 @@ export
   Equal == Equal = True
   Comma == Comma = True
   Ignore == Ignore = True
+  Comment == Comment = True
   _ == _ = False
 
 export
@@ -131,11 +134,13 @@ Interpolation InkyKind where
   interpolate Equal = "'='"
   interpolate Comma = "','"
   interpolate Ignore = ""
+  interpolate Comment = "comment"
 
 TokenKind InkyKind where
   TokType TermIdent = String
   TokType TypeIdent = String
   TokType Lit = Nat
+  TokType Comment = String
   TokType _ = ()
 
   tokValue TermIdent = id
@@ -171,6 +176,7 @@ TokenKind InkyKind where
   tokValue Equal = const ()
   tokValue Comma = const ()
   tokValue Ignore = const ()
+  tokValue Comment = drop 2
 
 keywords : List (String, InkyKind)
 keywords =
@@ -206,8 +212,7 @@ tokenMap : TokenMap InkyToken
 tokenMap =
   toTokenMap
     [ (spaces, Ignore)
-    , (lineComment $ exact "--", Ignore)
-    ] ++
+    , (lineComment $ exact "--", Comment)] ++
   [(termIdentifier, \s =>
     case lookup s keywords of
       Just k => Tok k s
@@ -486,14 +491,15 @@ LetTerm =
     [ mkLet <$> Seq
       [ WithBounds (match TermIdent)
       , OneOf
-        [ mkBound <$> Seq
+        [ mkAnnot <$> Seq
           [ star (enclose (match ParenOpen) (match ParenClose) $
             Seq [ match TermIdent, match Colon, rename Id (Drop Id) OpenType ])
           , WithBounds (match Colon)
           , rename Id (Drop Id) OpenType
           , match Equal
+          , star (match Comment)
           , Var (%%% "openTerm")]
-        , match Equal **> Var (%%% "openTerm")
+        , mkUnannot <$> Seq [match Equal, star (match Comment) , Var (%%% "openTerm")]
         ]
       , match In
       , Var (%%% "openTerm")
@@ -501,38 +507,51 @@ LetTerm =
     , mkLetType <$> Seq
       [ WithBounds (match TypeIdent)
       , match Equal
+      , star (match Comment)
       , rename Id (Drop Id) OpenType
       , match In
       , Var (%%% "openTerm")
       ]
     ]
   where
-  mkLet : HList [WithBounds String, TermFun, (), TermFun] -> TermFun
-  mkLet [x, e, _, t] =
+  mkLet : HList [WithBounds String, WithDoc TermFun, (), TermFun] -> TermFun
+  mkLet [x, AddDoc e doc, _, t] =
     MkParseFun (\tyCtx, tmCtx =>
-      pure $ Let x.bounds !(e.try tyCtx tmCtx) (x.val ** !(t.try tyCtx (tmCtx :< x.val))))
+      pure $
+      Let (AddDoc x.bounds doc) !(e.try tyCtx tmCtx) (x.val ** !(t.try tyCtx (tmCtx :< x.val))))
 
-  mkLetType : HList [WithBounds String, (), TypeFun, (), TermFun] -> TermFun
-  mkLetType [x, _, a, _, t] =
+  mkLetType : HList [WithBounds String, (), List String, TypeFun, (), TermFun] -> TermFun
+  mkLetType [x, _, doc, a, _, t] =
     MkParseFun (\tyCtx, tmCtx =>
-      pure $ LetTy x.bounds !(a.try tyCtx) (x.val ** !(t.try (tyCtx :< x.val) tmCtx)))
+      pure $
+      LetTy (AddDoc x.bounds doc) !(a.try tyCtx) (x.val ** !(t.try (tyCtx :< x.val) tmCtx)))
 
   mkArrow : List TypeFun -> TypeFun -> TypeFun
   mkArrow [] cod = cod
   mkArrow (arg :: args) cod =
     MkParseFun (\ctx => [| TArrow (arg.try ctx) ((mkArrow args cod).try ctx) |])
 
-  mkBound : HList [List (HList [String, (), TypeFun]), WithBounds (), TypeFun, (), TermFun] -> TermFun
-  mkBound [[], m, cod, _, t] =
-    MkParseFun (\tyCtx, tmCtx =>
-      pure $
-      Annot m.bounds !(t.try tyCtx tmCtx) !(cod.try tyCtx))
-  mkBound [args, m, cod, _, t] =
+  mkAnnot :
+    HList [List (HList [String, (), TypeFun]), WithBounds (), TypeFun, (), List String, TermFun] ->
+    WithDoc TermFun
+  mkAnnot [[], m, cod, _, doc, t] =
+    AddDoc
+      (MkParseFun (\tyCtx, tmCtx =>
+        pure $ Annot m.bounds !(t.try tyCtx tmCtx) !(cod.try tyCtx)))
+      doc
+  mkAnnot [args, m, cod, _, doc, t] =
     let bound = map (\[x, _, a] => x) args in
     let tys = map (\[x, _, a] => a) args in
-    MkParseFun (\tyCtx, tmCtx =>
-      pure $
-      Annot m.bounds (Abs m.bounds (bound ** !(t.try tyCtx (tmCtx <>< bound)))) !((mkArrow tys cod).try tyCtx))
+    AddDoc
+      (MkParseFun (\tyCtx, tmCtx =>
+        pure $
+        Annot m.bounds
+          (Abs m.bounds (bound ** !(t.try tyCtx (tmCtx <>< bound))))
+          !((mkArrow tys cod).try tyCtx)))
+      doc
+
+  mkUnannot : HList [(), List String, TermFun] -> WithDoc TermFun
+  mkUnannot [_, doc, e] = AddDoc e doc
 
 AbsTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
 AbsTerm =

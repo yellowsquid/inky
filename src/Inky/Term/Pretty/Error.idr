@@ -73,6 +73,10 @@ prettyNotSynths (AnnotNS {a} (Both contra1 contra2)) =
   (e.meta, pretty "ill-formed type" <+> line <+> prettyType a Open) ::
   prettyNotChecks contra2
 prettyNotSynths (LetNS1 contra) = prettyNotSynths contra
+prettyNotSynths (LetNS2' (This contra)) = prettyNotSynths contra
+prettyNotSynths (LetNS2' (That contra)) = prettyNotSynths contra
+prettyNotSynths (LetNS2' (Both contra1 contra2)) =
+  prettyNotSynths contra1 ++ prettyNotSynths contra2
 prettyNotSynths (LetNS2 prf contra) =
   case synthsRecompute prf of
     Val a => prettyNotSynths contra
@@ -130,6 +134,11 @@ prettyNotChecks (EmbedNC2 _ prf contra) =
         prettyType b Open
       )]
 prettyNotChecks (LetNC1 contra) = prettyNotSynths contra
+prettyNotChecks (LetNC2' (This contra)) = prettyNotSynths contra
+prettyNotChecks (LetNC2' (That contra)) = prettyNotChecks contra
+prettyNotChecks (LetNC2' (Both contra1 contra2)) =
+  prettyNotSynths contra1 ++
+  prettyNotChecks contra2
 prettyNotChecks (LetNC2 prf contra) =
   case synthsRecompute prf of
     Val _ => prettyNotChecks contra

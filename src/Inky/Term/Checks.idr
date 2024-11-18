@@ -63,6 +63,9 @@ synthsSplit (AnnotS wf prf) (AnnotNS contras) =
   these (wellFormedSplit wf) (checksSplit prf) (const $ checksSplit prf) contras
 synthsSplit VarS contra = absurd contra
 synthsSplit (LetS prf1 prf2) (LetNS1 contra) = synthsSplit prf1 contra
+synthsSplit (LetS prf1 prf2) (LetNS2' (This contra)) = synthsSplit prf1 contra
+synthsSplit (LetS (AnnotS wf prf1) prf2) (LetNS2' (That contra)) = synthsSplit prf2 contra
+synthsSplit (LetS prf1 prf2) (LetNS2' (Both contra1 contra2)) = synthsSplit prf1 contra1
 synthsSplit (LetS prf1 prf2) (LetNS2 prf1' contra) =
   let contra = rewrite synthsUnique prf1 prf1' in contra in
   synthsSplit prf2 contra
@@ -113,6 +116,9 @@ checksSplit (MapC prf1 prf2) (EmbedNC2 Map prf1' contra) =
   let contra = rewrite synthsUnique prf1 prf1' in contra in
   alphaSplit prf2 contra
 checksSplit (LetC prf1 prf2) (LetNC1 contra) = synthsSplit prf1 contra
+checksSplit (LetC prf1 prf2) (LetNC2' (This contra)) = synthsSplit prf1 contra
+checksSplit (LetC (AnnotS wf prf1) prf2) (LetNC2' (That contra)) = checksSplit prf2 contra
+checksSplit (LetC prf1 prf2) (LetNC2' (Both contra1 contra2)) = synthsSplit prf1 contra1
 checksSplit (LetC prf1 prf2) (LetNC2 prf1' contra) =
   let contra = rewrite synthsUnique prf1 prf1' in contra in
   checksSplit prf2 contra
@@ -238,6 +244,11 @@ synths tyEnv tmEnv (Annot _ t a) =
   map (uncurry AnnotS) AnnotNS $
   all (wellFormed a) (checks tyEnv tmEnv (sub tyEnv a) t)
 synths tyEnv tmEnv (Var _ i) = Just (indexAll i.pos tmEnv).value `Because` VarS
+synths tyEnv tmEnv (Let _ (Annot _ e a) (x ** t)) =
+  map id (\_ => uncurry (LetS . uncurry AnnotS)) (LetNS2' . mapFst AnnotNS) $
+  all
+    (all (wellFormed a) (checks tyEnv tmEnv (sub tyEnv a) e))
+    (synths tyEnv (tmEnv :< (x :- sub tyEnv a)) t)
 synths tyEnv tmEnv (Let _ e (x ** f)) =
   map snd
     (\(_, _), (prf1, prf2) => LetS prf1 prf2)
@@ -309,6 +320,11 @@ synths tyEnv tmEnv (Map _ (x ** a) b c) =
 
 checks tyEnv tmEnv a (Annot meta t b) = fallbackCheck Annot (synths tyEnv tmEnv $ Annot meta t b) a
 checks tyEnv tmEnv a (Var meta i) = fallbackCheck Var (synths tyEnv tmEnv $ Var meta i) a
+checks tyEnv tmEnv a (Let _ (Annot _ e b) (x ** t)) =
+  map (uncurry (LetC . uncurry AnnotS)) (LetNC2' . mapFst AnnotNS) $
+  all
+    (all (wellFormed b) (checks tyEnv tmEnv (sub tyEnv b) e))
+    (checks tyEnv (tmEnv :< (x :- sub tyEnv b)) a t)
 checks tyEnv tmEnv a (Let _ e (x ** t)) =
   map
     (\(_ ** (prf1, prf2)) => LetC prf1 prf2)

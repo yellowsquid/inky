@@ -418,6 +418,11 @@ data NotSynths where
   LetNS1 :
     NotSynths tyEnv tmEnv e ->
     NotSynths tyEnv tmEnv (Let meta e (x ** f))
+  LetNS2' :
+    These
+      (NotSynths tyEnv tmEnv (Annot meta' e a))
+      (NotSynths tyEnv (tmEnv :< (x :- sub tyEnv a)) f) ->
+    NotSynths tyEnv tmEnv (Let meta (Annot meta' e a) (x ** f))
   LetNS2 :
     Synths tyEnv tmEnv e a ->
     NotSynths tyEnv (tmEnv :< (x :- a)) f ->
@@ -470,6 +475,11 @@ data NotChecks where
   LetNC1 :
     NotSynths tyEnv tmEnv e ->
     NotChecks tyEnv tmEnv b (Let meta e (x ** t))
+  LetNC2' :
+    These
+      (NotSynths tyEnv tmEnv (Annot meta' e a))
+      (NotChecks tyEnv (tmEnv :< (x :- sub tyEnv a)) b t) ->
+    NotChecks tyEnv tmEnv b (Let meta (Annot meta' e a) (x ** t))
   LetNC2 :
     Synths tyEnv tmEnv e a ->
     NotChecks tyEnv (tmEnv :< (x :- a)) b t ->

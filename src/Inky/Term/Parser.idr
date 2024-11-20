@@ -18,6 +18,7 @@ import Flap.Parser
 
 import Inky.Data.Row
 import Inky.Term
+import Inky.Term.Sugar
 import Inky.Type
 
 import Text.Lexer
@@ -39,6 +40,7 @@ data InkyKind
   | Nat
   | List
   | Suc
+  | Cons
   | Map
   | ParenOpen
   | ParenClose
@@ -76,6 +78,7 @@ export
   Nat == Nat = True
   List == List = True
   Suc == Suc = True
+  Cons == Cons = True
   Map == Map = True
   ParenOpen == ParenOpen = True
   ParenClose == ParenClose = True
@@ -114,6 +117,7 @@ Interpolation InkyKind where
   interpolate Nat = "'Nat'"
   interpolate List = "'List'"
   interpolate Suc = "'suc'"
+  interpolate Cons = "'cons'"
   interpolate Map = "'map'"
   interpolate ParenOpen = "'('"
   interpolate ParenClose = "')'"
@@ -156,6 +160,7 @@ TokenKind InkyKind where
   tokValue Nat = const ()
   tokValue List = const ()
   tokValue Suc = const ()
+  tokValue Cons = const ()
   tokValue Map = const ()
   tokValue ParenOpen = const ()
   tokValue ParenClose = const ()
@@ -190,6 +195,7 @@ keywords =
   , ("Nat", Nat)
   , ("List", List)
   , ("suc", Suc)
+  , ("cons", Cons)
   , ("map", Map)
   ]
 
@@ -386,7 +392,10 @@ AtomTerm =
   OneOf
     [ mkVar2 (\x => Var x.bounds x.val) <$> WithBounds (match TermIdent)
     , mkLit <$> WithBounds (match Lit)
-    , mkSuc <$> WithBounds (match Suc)
+    , mkList <$> WithBounds (
+        enclose (match BracketOpen) (match BracketClose) $
+        sepBy (match Comma) $
+        Var (%%% "openTerm"))
     , mkTup <$> WithBounds (enclose (match AngleOpen) (match AngleClose) $
         RowOf [<"openTerm" :- TermFun] (Var (%%% "openTerm")))
     , enclose (match ParenOpen) (match ParenClose) (Var (%%% "openTerm"))
@@ -395,8 +404,13 @@ AtomTerm =
   mkLit : WithBounds Nat -> TermFun
   mkLit k = MkParseFun (\tyCtx, tmCtx => pure (Lit k.bounds k.val))
 
-  mkSuc : WithBounds () -> TermFun
-  mkSuc x = MkParseFun (\_, _ => pure (Suc x.bounds))
+  mkList : WithBounds (List TermFun) -> TermFun
+  mkList xs =
+    MkParseFun (\tyCtx, tmCtx =>
+      foldr
+        (\x, ys => pure $ Cons xs.bounds !(x.try tyCtx tmCtx) !ys)
+        (pure $ Nil xs.bounds)
+        xs.val)
 
   mkTup : WithBounds (List (WithBounds $ Assoc TermFun)) -> TermFun
   mkTup xs = MkParseFun (\tyCtx, tmCtx => Tup xs.bounds <$> tryRow2 xs.val tyCtx tmCtx)
@@ -431,6 +445,15 @@ AppTerm =
       [ WithBounds (match TypeIdent)
       , weaken (S Z) SuffixTerm
       ]
+    , mkSuc <$> Seq
+      [ WithBounds (match Suc)
+      , weaken (S Z) SuffixTerm
+      ]
+    , mkCons <$> Seq
+      [ WithBounds (match Cons)
+      , weaken (S Z) SuffixTerm
+      , weaken (S Z) SuffixTerm
+      ]
     , mkApp <$> Seq
       [ OneOf
         [ WithBounds SuffixTerm
@@ -452,6 +475,14 @@ AppTerm =
   where
   mkInj : HList [WithBounds String, TermFun] -> TermFun
   mkInj [tag, t] = MkParseFun (\tyCtx, tmCtx => Inj tag.bounds tag.val <$> t.try tyCtx tmCtx)
+
+  mkSuc : HList [WithBounds _, TermFun] -> TermFun
+  mkSuc [x, t] = MkParseFun (\tyCtx, tmCtx => Suc x.bounds <$> t.try tyCtx tmCtx)
+
+  mkCons : HList [WithBounds _, TermFun, TermFun] -> TermFun
+  mkCons [x, t, u] =
+    MkParseFun (\tyCtx, tmCtx =>
+      pure $ Cons x.bounds !(t.try tyCtx tmCtx) !(u.try tyCtx tmCtx))
 
   mkMap : HList [WithBounds (), HList [_, String, _, TypeFun], TypeFun, TypeFun] -> WithBounds TermFun
   mkMap [m, [_, x, _, a], b, c] =

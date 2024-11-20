@@ -67,14 +67,14 @@ checkType a = do
     | False `Because` bad => throw "type ill-formed"
   pure (Forget wf)
 
-checkTerm :
-  (a : Ty [<]) -> (t : Term mode m [<] [<]) ->
-  HasErr (NotChecks [<] [<] a t) es =>
-  App es (Erased $ Checks [<] [<] a t)
-checkTerm a t = do
-  let True `Because` prf = checks [<] [<] a t
-    | False `Because` contra => throw contra
-  pure (Forget prf)
+synthTerm :
+  (t : Term mode m [<] [<]) ->
+  HasErr (NotSynths [<] [<] t) es =>
+  App es (Subset (Ty [<]) (Synths [<] [<] t))
+synthTerm t = do
+  let Just a `Because` prf = synths [<] [<] t
+    | Nothing `Because` contra => throw contra
+  pure (Element a prf)
 
 printType :
   PrimIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
@@ -88,27 +88,25 @@ printTerm :
 printTerm a = do
   primIO $ renderIO $ layoutSmart opts $ prettyTerm a Open
 
-printCheckError :
+printSynthError :
   PrimIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
-  {a : Ty [<]} -> {t : Term mode Bounds [<] [<]} ->
-  NotChecks [<] [<] a t -> App es ()
-printCheckError contra =
+  {t : Term mode Bounds [<] [<]} ->
+  NotSynths [<] [<] t -> App es ()
+printSynthError contra =
   primIO $ renderIO $ layoutSmart opts $
   concatWith (surround hardline) $
   map (\(bounds, msg) => group $ align $ hang 2 $ pretty "\{bounds}:" <+> line <+> msg) $
-  prettyNotChecks contra
+  prettyNotSynths contra
 
 compileTerm :
   PrimIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
-  {a : Ty [<]} ->
   {t : Term mode m [<] [<]} ->
-  (0 wf : WellFormed a) ->
-  (0 prf : Checks [<] [<] a t) ->
+  (0 prf : Synths [<] [<] t a) ->
   App es ()
-compileTerm wf prf =
+compileTerm prf =
   primIO $ renderIO $ layoutSmart opts $
   pretty "(use-modules (ice-9 match))" <+> line <+>
-  parens (hang 1 $ pretty "define main" <+> line <+> group (compileChecks [<] [<] wf prf))
+  parens (hang 1 $ pretty "define main" <+> line <+> group (compileSynths [<] [<] prf))
 
 readFile : FileIO es => File -> App es String
 readFile f = do
@@ -257,17 +255,17 @@ main = run {l = MayThrow} $ do
           toks <- handle {err = String} (lexInkyString txt) pure abortErr
           t <- handle {err = String} (parseTerm toks) pure abortErr
           let [type] = cmd.modifiers.content
-          a <-
-            maybe (pure (TArrow TNat TNat))
+          t <-
+            maybe (pure t)
               (\path => do
                 txt <- handle {err = IOError} (readFileOrStdin $ Just path) pure (abortErr . show)
                 toks <- handle {err = String} (lexInkyString txt) pure abortErr
                 a <- handle {err = String} (parseType toks) pure abortErr
                 handle {err = String} (checkType a) (const $ pure ()) abortErr
-                pure a)
+                pure (Annot (MkBounds (-1) (-1) (-1) (-1)) t a))
               type
-          handle {err = NotChecks [<] [<] a t} (checkTerm a t) (const $ pure ())
-            (\contra => do printCheckError contra; primIO exitFailure)
+          handle {err = NotSynths [<] [<] t} (synthTerm t) (const $ pure ())
+            (\contra => do printSynthError contra; primIO exitFailure)
         ]
       ]
     , "compile" ::=
@@ -279,20 +277,19 @@ main = run {l = MayThrow} $ do
           toks <- handle {err = String} (lexInkyString txt) pure abortErr
           t <- handle {err = String} (parseTerm toks) pure abortErr
           let [type] = cmd.modifiers.content
-          Element a wf <-
-            the (App _ (Subset (Ty [<]) WellFormed)) $
-            maybe (pure (Element (TArrow TNat TNat) %search))
+          t <-
+            maybe (pure t)
               (\path => do
                 txt <- handle {err = IOError} (readFileOrStdin $ Just path) pure (abortErr . show)
                 toks <- handle {err = String} (lexInkyString txt) pure abortErr
                 a <- handle {err = String} (parseType toks) pure abortErr
-                Forget wf <- handle {err = String} (checkType a) pure abortErr
-                pure (Element a wf))
+                handle {err = String} (checkType a) (const $ pure ()) abortErr
+                pure (Annot (MkBounds (-1) (-1) (-1) (-1)) t a))
               type
-          Forget prf <-
-            handle {err = NotChecks [<] [<] a t} (checkTerm a t) pure
-              (\contra => do printCheckError contra; primIO exitFailure)
-          compileTerm wf prf
+          Element _ prf <-
+            handle {err = NotSynths [<] [<] t} (synthTerm t) pure
+              (\contra => do printSynthError contra; primIO exitFailure)
+          compileTerm prf
         ]
       ]
     ]

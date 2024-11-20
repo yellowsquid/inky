@@ -5,6 +5,7 @@ import Data.String
 
 import Inky.Term
 import Inky.Type.Pretty
+import Inky.Term.Sugar
 
 import Text.Bounded
 import Text.PrettyPrint.Prettyprinter
@@ -46,26 +47,53 @@ Ord TermPrec where
 export
 prettyTerm : {tyCtx, tmCtx : SnocList String} -> Term mode m tyCtx tmCtx -> TermPrec -> Doc ann
 prettyAllTerm : {tyCtx, tmCtx : SnocList String} -> List (Term mode m tyCtx tmCtx) -> TermPrec -> List (Doc ann)
-prettyTermCtx : {tyCtx, tmCtx : SnocList String} -> Context (Term mode m tyCtx tmCtx) -> TermPrec -> SnocList (Doc ann)
+prettyTermCtx : {tyCtx, tmCtx : SnocList String} -> Context (Term mode m tyCtx tmCtx) -> SnocList (Doc ann)
 prettyCases : {tyCtx, tmCtx : SnocList String} -> Context (x ** Term mode m tyCtx (tmCtx :< x)) -> SnocList (Doc ann)
-prettyLet : Doc ann -> Doc ann -> Doc ann
+prettyLet :
+  (eqLine : Doc ann) ->
+  (doc : List String) ->
+  (bound, body : Doc ann) ->
+  Doc ann
 lessPrettyTerm : {tyCtx, tmCtx : SnocList String} -> Term mode m tyCtx tmCtx -> TermPrec -> Doc ann
 
 prettyTerm t d =
-  case isLit t <|> isCheckLit t of
+  case isLit t of
     Just k => pretty k
     Nothing =>
-      if isSuc t
-      then pretty "suc"
-      else lessPrettyTerm t d
+      case isSuc t of
+        Just u =>
+          group $ align $ hang 2 $ parenthesise (d < App) $
+            concatWith (surround line) [pretty "suc", prettyTerm (assert_smaller t u) Suffix]
+        Nothing => case isList t of
+          Just ts =>
+            let ts = prettyAllTerm (assert_smaller t ts) Open in
+            group $ align $ flatAlt
+              (enclose ("[" <++> neutral) (line <+> "]") $
+                concatWith (surround $ line <+> "," <++> neutral) ts)
+              (enclose "[" "]" $ concatWith (surround $ "," <++> neutral) ts)
+          Nothing => case isCons t of
+            Just (hd, tl) =>
+              group $ align $ hang 2 $ parenthesise (d < App) $
+                concatWith (surround line)
+                  [ pretty "cons"
+                  , prettyTerm (assert_smaller t hd) Suffix
+                  , prettyTerm (assert_smaller t tl) Suffix
+                  ]
+            Nothing => lessPrettyTerm t d
 
 prettyAllTerm [] d = []
 prettyAllTerm (t :: ts) d = prettyTerm t d :: prettyAllTerm ts d
 
-prettyTermCtx [<] d = [<]
-prettyTermCtx (ts :< (l :- t)) d =
-  prettyTermCtx ts d :<
-  (group $ hang 2 $ pretty l <+> ":" <+> line <+> prettyTerm t d)
+prettyTermCtx [<] = [<]
+prettyTermCtx (ts :< (l :- Abs _ (bound ** t))) =
+ prettyTermCtx ts :<
+ (group $ align $
+   pretty l <+> ":" <++>
+     "\\" <+> concatWith (surround $ "," <++> neutral) (map pretty bound) <++> "=>" <+> line <+>
+   prettyTerm t Open)
+prettyTermCtx (ts :< (l :- t)) =
+  prettyTermCtx ts :<
+  (group $ align $ pretty l <+> ":" <+> line <+> prettyTerm t Open)
 
 prettyCases [<] = [<]
 prettyCases (ts :< (l :- (x ** Abs _ (bound ** t)))) =
@@ -80,12 +108,21 @@ prettyCases (ts :< (l :- (x ** t))) =
     pretty l <++> pretty x <++> "=>" <+> line <+>
     prettyTerm t Open)
 
-prettyLet binding term =
+prettyLet eqLine [] bound body =
+  group $
   (group $
-    pretty "let" <++>
-    (group $ hang (-2) $ binding) <+> line <+>
+    hang 2
+      (group (pretty "let" <++> eqLine) <+> line <+>
+       group bound) <+> line <+>
     "in") <+> line <+>
-  term
+  group body
+prettyLet eqLine doc bound body  =
+  (hang 2 $
+    group (pretty "let" <++> eqLine) <+> hardline <+>
+    concatMap (enclose "--" hardline . pretty) doc <+>
+    group bound) <+> hardline <+>
+  "in" <+> line <+>
+  group body
 
 lessPrettyTerm (Annot _ t a) d =
   group $ align $ parenthesise (d < Annot) $
@@ -95,22 +132,22 @@ lessPrettyTerm (Var _ i) d = pretty (unVal $ nameOf i)
 lessPrettyTerm (Let meta (Annot _ (Abs _ (bound ** e)) a) (x ** t)) d =
   let (binds, cod, rest) = groupBinds bound a in
   let binds = map (\x => parens (pretty x.name <++> ":" <++> prettyType x.value Open)) binds in
-  let doc = concatMap (enclose "--" hardline . pretty) meta.doc in
   group $ align $ parenthesise (d < Open) $
   prettyLet
-    ( (group $ hang 2 $ flatAlt
+   (group $ hang 2 $ flatAlt
         ( pretty x <+> line <+>
           concatWith (surround line) binds <+> line <+>
-          ":" <++> prettyType cod Open
+          ":" <++> prettyType cod Open <++> "=" <+>
+          if null rest then neutral
+          else line <+> "\\" <+> concatWith (surround $ "," <++> neutral) (map pretty rest) <++> "=>"
         )
-        (pretty x <++> concatWith (<++>) binds <++> ":" <++> prettyType cod Open)
-      ) <++> "=" <+>
-      ( if null rest
-        then neutral
-        else neutral <++> "\\" <+> concatWith (surround $ "," <++> neutral) (map pretty rest) <++> "=>")
-      <+> line <+> doc <+> prettyTerm e Open
-    )
-    (prettyTerm t Open)
+        ( pretty x <++> concatWith (<++>) binds <++> ":" <++> prettyType cod Open <++> "=" <+>
+          if null rest then neutral
+          else neutral <++> "\\" <+> concatWith (surround $ "," <++> neutral) (map pretty rest) <++> "=>"
+        ))
+   meta.doc
+   (prettyTerm e Open)
+   (prettyTerm t Open)
   where
   groupBinds : List String -> Ty tyCtx -> (List (Assoc $ Ty tyCtx), Ty tyCtx, List String)
   groupBinds [] a = ([], a, [])
@@ -119,24 +156,25 @@ lessPrettyTerm (Let meta (Annot _ (Abs _ (bound ** e)) a) (x ** t)) d =
     ((x :- a) :: binds, cod, rest)
   groupBinds xs a = ([], a, xs)
 lessPrettyTerm (Let meta (Annot _ e a) (x ** t)) d =
-  let doc = concatMap (enclose "--" hardline . pretty) meta.doc in
   group $ align $ parenthesise (d < Open) $
   prettyLet
-    ( pretty x <++> ":" <++> prettyType a Open <++> "=" <+> line <+>
-      doc <+> prettyTerm e Open
-    )
+    (pretty x <+> line <+> ":" <++> prettyType a Open <++> "=")
+    meta.doc
+    (prettyTerm e Open)
     (prettyTerm t Open)
 lessPrettyTerm (Let meta e (x ** t)) d =
-  let doc = concatMap (enclose "--" hardline . pretty) meta.doc in
   group $ align $ parenthesise (d < Open) $
   prettyLet
-    (pretty x <++> "=" <+> line <+> doc <+> prettyTerm e Open)
+    (pretty x <++> "=")
+    meta.doc
+    (prettyTerm e Open)
     (prettyTerm t Open)
 lessPrettyTerm (LetTy meta a (x ** t)) d =
-  let doc = concatMap (enclose "--" hardline . pretty) meta.doc in
   group $ align $ parenthesise (d < Open) $
   prettyLet
-    (pretty x <++> "=" <+> line <+> doc <+> prettyType a Open)
+    (pretty x <++> "=")
+    meta.doc
+    (prettyType a Open)
     (prettyTerm t Open)
 lessPrettyTerm (Abs _ (bound ** t)) d =
   group $ hang 2 $ parenthesise (d < Open) $
@@ -154,7 +192,7 @@ lessPrettyTerm (App _ f ts) d =
   group $ align $ hang 2 $ parenthesise (d < App) $
     concatWith (surround line) (prettyTerm f Suffix :: prettyAllTerm ts Suffix)
 lessPrettyTerm (Tup _ (MkRow ts _)) d =
-  let parts = prettyTermCtx ts Open <>> [] in
+  let parts = prettyTermCtx ts <>> [] in
   group $ align $ enclose "<" ">" $
     flatAlt
       (neutral <++> concatWith (surround $ line' <+> "," <++> neutral) parts <+> line)
@@ -168,7 +206,7 @@ lessPrettyTerm (Inj _ l t) d =
 lessPrettyTerm (Case _ e (MkRow ts _)) d =
   let parts = prettyCases ts <>> [] in
   group $ align $ hang 2 $ parenthesise (d < Open) $
-    (group $ hang (-2) $ "case" <++> prettyTerm e Open <+> line <+> "of") <+> line <+>
+    (group $ "case" <++> prettyTerm e Open <++> "of") <+> line <+>
     (braces $ flatAlt
       (neutral <++> concatWith (surround $ line' <+> ";" <++> neutral) parts <+> line)
       (concatWith (surround $ ";" <++> neutral) parts))

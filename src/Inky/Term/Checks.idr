@@ -204,6 +204,7 @@ fallbackCheck prf p a =
     (either (EmbedNC1 prf) (\xPrf => uncurry (EmbedNC2 prf) $ snd xPrf)) $
   (b := p) >=> alpha b a
 
+export
 synths :
   (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
   (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->

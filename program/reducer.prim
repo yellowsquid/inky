@@ -31,7 +31,7 @@ let index (xs : List SysT) : Nat -> SysT =
     ; C p => \k => case !k of {Z u => p.H; S k => p.T k}
     }
 in
-let shift = map (\X => List X) SysT SysT (\t => rename t suc) in
+let shift = map (\X => List X) SysT SysT (\t => rename t (\x => suc x)) in
 let sub (t : SysT) : List SysT -> SysT =
   foldcase t by
     { Var n => \env => index env n
@@ -40,22 +40,23 @@ let sub (t : SysT) : List SysT -> SysT =
     ; Primrec p => \env =>
       ~(Primrec
          < Zero: p.Zero env
-         , Suc: p.Suc ~(C <H: ~(Var 0), T: shift env>)
+         , Suc: p.Suc (cons ~(Var 0) (shift env))
          , Target: p.Target env
          >)
-    ; Abs f => \env => ~(Abs (f ~(C <H: ~(Var 0), T: shift env>)))
+    ; Abs f => \env => ~(Abs (f (cons ~(Var 0) (shift env))))
     ; App p => \env => ~(App <Fun: p.Fun env, Arg: p.Arg env>)
     }
 in
 let app (fun : SysT) (arg : SysT) (smaller : Bool) : Stepped =
-  let default : Stepped = <Term: ~(App <Fun: fun, Arg: arg>), Smaller: smaller>
+  let default : Stepped =
+    <Term: ~(App <Fun: fun, Arg: arg>), Smaller: smaller>
   in
   case !fun of
     { Var n => default
     ; Zero u => default
     ; Suc t => default
     ; Primrec p => default
-    ; Abs t => <Term: sub t ~(C <H: arg, T: ~(N <>)>), Smaller: T <>>
+    ; Abs t => <Term: sub t [arg], Smaller: T <>>
     ; App t => default
     }
 in
@@ -67,10 +68,7 @@ let rec (z : SysT) (s : SysT) (target : SysT) (smaller : Bool) : Stepped =
     { Var n => default
     ; Zero u => <Term: z, Smaller: T <>>
     ; Suc t =>
-      < Term:
-          sub s ~(C <H: ~(Primrec <Zero: z, Suc: s, Target: t>), T: ~(N <>)>)
-      , Smaller: T <>
-      >
+      <Term: sub s [~(Primrec <Zero: z, Suc: s, Target: t>)], Smaller: T <>>
     ; Primrec p => default
     ; Abs t => default
     ; App t => default
@@ -91,13 +89,13 @@ let step (t : SysT) : Stepped =
             (or t.Zero.Smaller t.Suc.Smaller)
         ; T u =>
           < Term:
-              ~(Primrec
-                 (map
-                   (\X => <Zero: X, Suc: X, Target: X>)
-                   Stepped
-                   SysT
-                   (\p => p.Term)
-                   t))
+            ~(Primrec
+               (map
+                 (\X => <Zero: X, Suc: X, Target: X>)
+                 Stepped
+                 SysT
+                 (\p => p.Term)
+                 t))
           , Smaller: T <>
           >
         }
@@ -107,8 +105,7 @@ let step (t : SysT) : Stepped =
         { F u => app t.Fun.Term t.Arg.Term t.Fun.Smaller
         ; T u =>
           < Term:
-              ~(App
-                 (map (\X => <Fun: X, Arg: X>) Stepped SysT (\p => p.Term) t))
+            ~(App (map (\X => <Fun: X, Arg: X>) Stepped SysT (\p => p.Term) t))
           , Smaller: T <>
           >
         }

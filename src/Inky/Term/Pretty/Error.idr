@@ -22,6 +22,7 @@ Pretty (ChecksOnly t) where
   pretty Roll = "rolling"
   pretty Fold = "fold"
 
+export
 prettyNotSynths :
   {tyCtx, tmCtx : SnocList String} ->
   {e : Term mode m tyCtx tmCtx} ->
@@ -99,7 +100,7 @@ prettyNotSynths (PrjNS2 prf f) =
       , pretty "cannot project non-product type" <+> line <+>
         prettyType a Open
       )]
-prettyNotSynths (PrjNS3 {l, as} prf contra) =
+prettyNotSynths (PrjNS3 {l, e, as} prf contra) =
   case synthsRecompute prf of
     Val (TProd as) =>
       [(e.meta

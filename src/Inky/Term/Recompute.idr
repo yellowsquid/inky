@@ -76,7 +76,7 @@ dropAllWellFormed (wfs :< wf) (There i) = dropAllWellFormed wfs i :< wf
 
 export
 synthsWf :
-  {e : Term mode m tyCtx tmCtx} ->
+  {e : Term NoSugar m tyCtx tmCtx} ->
   {tyEnv : All (Assoc0 $ Ty [<]) tyCtx} ->
   {tmEnv : All (Assoc0 $ Ty [<]) tmCtx} ->
   DAll WellFormed tyEnv -> DAll WellFormed tmEnv ->
@@ -85,7 +85,7 @@ checkSpineWf :
   CheckSpine tyEnv tmEnv a ts b ->
   WellFormed a -> WellFormed b
 allSynthsWf :
-  {es : Context (Term mode m tyCtx tmCtx)} ->
+  {es : Context (Term NoSugar m tyCtx tmCtx)} ->
   {tyEnv : All (Assoc0 $ Ty [<]) tyCtx} ->
   {tmEnv : All (Assoc0 $ Ty [<]) tmCtx} ->
   DAll WellFormed tyEnv -> DAll WellFormed tmEnv ->

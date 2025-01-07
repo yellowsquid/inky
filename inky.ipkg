@@ -22,8 +22,6 @@ modules
   , Inky.Term.Pretty
   , Inky.Term.Pretty.Error
   , Inky.Term.Recompute
-  , Inky.Term.Substitution
-  , Inky.Term.Sugar
   , Inky.Type
   , Inky.Type.Pretty
   , Inky.Type.Substitution

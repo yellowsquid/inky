@@ -149,7 +149,7 @@ compileFold {a} wf prf target bind body =
 export
 compileSynths :
   {tmCtx : SnocList String} ->
-  {t : Term mode m tyCtx tmCtx} ->
+  {t : Term NoSugar m tyCtx tmCtx} ->
   {tyEnv : All (Assoc0 $ Ty [<]) tyCtx} ->
   {tmEnv : All (Assoc0 $ Ty [<]) tmCtx} ->
   (0 tyWf : DAll WellFormed tyEnv) ->
@@ -159,7 +159,7 @@ compileSynths :
 export
 compileChecks :
   {tmCtx : SnocList String} ->
-  {t : Term mode m tyCtx tmCtx} ->
+  {t : Term NoSugar m tyCtx tmCtx} ->
   {tyEnv : All (Assoc0 $ Ty [<]) tyCtx} ->
   {tmEnv : All (Assoc0 $ Ty [<]) tmCtx} ->
   (0 tyWf : DAll WellFormed tyEnv) ->
@@ -170,7 +170,7 @@ compileChecks :
   Doc ann
 compileSpine :
   {tmCtx : SnocList String} ->
-  {ts : List (Term mode m tyCtx tmCtx)} ->
+  {ts : List (Term NoSugar m tyCtx tmCtx)} ->
   {tyEnv : All (Assoc0 $ Ty [<]) tyCtx} ->
   {tmEnv : All (Assoc0 $ Ty [<]) tmCtx} ->
   (0 tyWf : DAll WellFormed tyEnv) ->
@@ -182,7 +182,7 @@ compileSpine :
   Doc ann
 compileAllSynths :
   {tmCtx : SnocList String} ->
-  {ts : Context (Term mode m tyCtx tmCtx)} ->
+  {ts : Context (Term NoSugar m tyCtx tmCtx)} ->
   {tyEnv : All (Assoc0 $ Ty [<]) tyCtx} ->
   {tmEnv : All (Assoc0 $ Ty [<]) tmCtx} ->
   (0 tyWf : DAll WellFormed tyEnv) ->
@@ -191,7 +191,7 @@ compileAllSynths :
   All (Assoc0 $ Doc ann) ts.names
 compileAllChecks :
   {tmCtx : SnocList String} ->
-  {ts : Context (Term mode m tyCtx tmCtx)} ->
+  {ts : Context (Term NoSugar m tyCtx tmCtx)} ->
   {tyEnv : All (Assoc0 $ Ty [<]) tyCtx} ->
   {tmEnv : All (Assoc0 $ Ty [<]) tmCtx} ->
   (0 tyWf : DAll WellFormed tyEnv) ->
@@ -203,7 +203,7 @@ compileAllChecks :
   All (Assoc0 $ Doc ann) ts.names
 compileAllBranches :
   {tmCtx : SnocList String} ->
-  {ts : Context (x ** Term mode m tyCtx (tmCtx :< x))} ->
+  {ts : Context (x ** Term NoSugar m tyCtx (tmCtx :< x))} ->
   {tyEnv : All (Assoc0 $ Ty [<]) tyCtx} ->
   {tmEnv : All (Assoc0 $ Ty [<]) tmCtx} ->
   (0 tyWf : DAll WellFormed tyEnv) ->

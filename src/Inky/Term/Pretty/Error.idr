@@ -25,7 +25,7 @@ Pretty (ChecksOnly t) where
 export
 prettyNotSynths :
   {tyCtx, tmCtx : SnocList String} ->
-  {e : Term mode m tyCtx tmCtx} ->
+  {e : Term NoSugar m tyCtx tmCtx} ->
   {tyEnv : _} -> {tmEnv : _} ->
   NotSynths tyEnv tmEnv e ->
   List (m, Doc ann)
@@ -33,33 +33,33 @@ export
 prettyNotChecks :
   {tyCtx, tmCtx : SnocList String} ->
   {a : Ty [<]} ->
-  {t : Term mode m tyCtx tmCtx} ->
+  {t : Term NoSugar m tyCtx tmCtx} ->
   {tyEnv : _} -> {tmEnv : _} ->
   NotChecks tyEnv tmEnv a t ->
   List (m, Doc ann)
 prettyNotCheckSpine :
   {tyCtx, tmCtx : SnocList String} ->
   {a : Ty [<]} ->
-  {ts : List (Term mode m tyCtx tmCtx)} ->
+  {ts : List (Term NoSugar m tyCtx tmCtx)} ->
   {tyEnv : _} -> {tmEnv : _} ->
   NotCheckSpine tyEnv tmEnv a ts ->
   List (m, Doc ann)
 prettyAnyNotSynths :
   {tyCtx, tmCtx : SnocList String} ->
-  {es : Context (Term mode m tyCtx tmCtx)} ->
+  {es : Context (Term NoSugar m tyCtx tmCtx)} ->
   {tyEnv : _} -> {tmEnv : _} ->
   AnyNotSynths tyEnv tmEnv es ->
   List (m, Doc ann)
 prettyAnyNotChecks :
   {tyCtx, tmCtx : SnocList String} ->
-  {ts : Context (Term mode m tyCtx tmCtx)} ->
+  {ts : Context (Term NoSugar m tyCtx tmCtx)} ->
   {tyEnv : _} -> {tmEnv : _} -> {as : Context _} ->
   (meta : m) ->
   AnyNotChecks tyEnv tmEnv as ts ->
   List (m, Doc ann)
 prettyAnyNotBranches :
   {tyCtx, tmCtx : SnocList String} ->
-  {ts : Context (x ** Term mode m tyCtx (tmCtx :< x))} ->
+  {ts : Context (x ** Term NoSugar m tyCtx (tmCtx :< x))} ->
   {tyEnv : _} -> {tmEnv : _} -> {as : Context _} -> {a : _} ->
   (meta : m) ->
   AnyNotBranches tyEnv tmEnv as a ts ->

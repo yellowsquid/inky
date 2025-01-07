@@ -1,13 +1,16 @@
 module Inky.Term.Checks
 
 import Control.Function
+
 import Data.DPair
 import Data.List.Quantifiers
 import Data.Singleton
 import Data.These
+
 import Flap.Data.SnocList.Quantifiers
 import Flap.Decidable
 import Flap.Decidable.Maybe
+
 import Inky.Term
 import Inky.Term.Recompute
 
@@ -208,23 +211,23 @@ export
 synths :
   (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
   (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
-  (e : Term mode m tyCtx tmCtx) ->
+  (e : Term NoSugar m tyCtx tmCtx) ->
   Proof (Ty [<]) (Synths tyEnv tmEnv e) (NotSynths tyEnv tmEnv e)
 export
 checks :
   (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
   (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
-  (a : Ty [<]) -> (t : Term mode m tyCtx tmCtx) ->
+  (a : Ty [<]) -> (t : Term NoSugar m tyCtx tmCtx) ->
   LazyEither (Checks tyEnv tmEnv a t) (NotChecks tyEnv tmEnv a t)
 checkSpine :
   (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
   (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
-  (a : Ty [<]) -> (ts : List (Term mode m tyCtx tmCtx)) ->
+  (a : Ty [<]) -> (ts : List (Term NoSugar m tyCtx tmCtx)) ->
   Proof (Ty [<]) (CheckSpine tyEnv tmEnv a ts) (NotCheckSpine tyEnv tmEnv a ts)
 allSynths :
   (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
   (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
-  (es : Context (Term mode m tyCtx tmCtx)) ->
+  (es : Context (Term NoSugar m tyCtx tmCtx)) ->
   (0 fresh : AllFresh es.names) ->
   Proof (Subset (Row (Ty [<])) (\as => es.names = as.names))
     (AllSynths tyEnv tmEnv es . Subset.fst)
@@ -232,12 +235,13 @@ allSynths :
 allChecks :
   (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
   (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
-  (as : Context (Ty [<])) -> (ts : Context (Term mode m tyCtx tmCtx)) ->
+  (as : Context (Ty [<])) -> (ts : Context (Term NoSugar m tyCtx tmCtx)) ->
   LazyEither (AllChecks tyEnv tmEnv as ts) (AnyNotChecks tyEnv tmEnv as ts)
 allBranches :
   (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
   (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
-  (as : Context (Ty [<])) -> (a : Ty [<]) -> (ts : Context (x ** Term mode m tyCtx (tmCtx :< x))) ->
+  (as : Context (Ty [<])) -> (a : Ty [<]) ->
+  (ts : Context (x ** Term NoSugar m tyCtx (tmCtx :< x))) ->
   LazyEither (AllBranches tyEnv tmEnv as a ts) (AnyNotBranches tyEnv tmEnv as a ts)
 
 synths tyEnv tmEnv (Annot _ t a) =

@@ -6,31 +6,45 @@ import Inky.Type
 import Text.PrettyPrint.Prettyprinter
 
 public export
-data TyPrec = Atom | App | Open
+data InkyPrec = Atom | Prefix | Suffix | App | Annot | Open
 
-%name TyPrec d
+%name InkyPrec d
 
-Eq TyPrec where
+export
+Eq InkyPrec where
   Atom == Atom = True
+  Prefix == Prefix = True
+  Suffix == Suffix = True
   App == App = True
+  Annot == Annot = True
   Open == Open = True
   _ == _ = False
 
-Ord TyPrec where
+export
+Ord InkyPrec where
   compare Atom Atom = EQ
-  compare Atom App = LT
-  compare Atom Open = LT
-  compare App Atom = GT
+  compare Atom d2 = LT
+  compare Prefix Atom = GT
+  compare Prefix Prefix = EQ
+  compare Prefix d2 = LT
+  compare Suffix Atom = GT
+  compare Suffix Prefix = GT
+  compare Suffix Suffix = EQ
+  compare Suffix d2 = LT
   compare App App = EQ
+  compare App Annot = LT
   compare App Open = LT
-  compare Open Atom = GT
-  compare Open App = GT
+  compare App d2 = GT
+  compare Annot Annot = EQ
+  compare Annot Open = LT
+  compare Annot d2 = GT
   compare Open Open = EQ
+  compare Open d2 = GT
 
 export
-prettyType : {ctx : SnocList String} -> Ty ctx -> TyPrec -> Doc ann
-lessPrettyType : {ctx : SnocList String} -> Ty ctx -> TyPrec -> Doc ann
-lessPrettyTypeCtx : {ctx : SnocList String} -> Context (Ty ctx) -> TyPrec -> SnocList (Doc ann)
+prettyType : {ctx : SnocList String} -> Ty ctx -> InkyPrec -> Doc ann
+lessPrettyType : {ctx : SnocList String} -> Ty ctx -> InkyPrec -> Doc ann
+lessPrettyTypeCtx : {ctx : SnocList String} -> Context (Ty ctx) -> InkyPrec -> SnocList (Doc ann)
 
 prettyType a d =
   if does (alpha {ctx2 = [<]} a TNat)
@@ -55,14 +69,14 @@ lessPrettyType (TProd (MkRow as _)) d =
   let parts = lessPrettyTypeCtx as Open <>> [] in
   group $ align $ enclose "<" ">" $
     flatAlt
-      (neutral <++> concatWith (surround $ line <+> "," <++> neutral) parts <+> line)
-      (concatWith (surround $ "," <++> neutral) parts)
+      (neutral <++> concatWith (surround $ line <+> ";" <++> neutral) parts <+> line)
+      (concatWith (surround $ ";" <++> neutral) parts)
 lessPrettyType (TSum (MkRow as _)) d =
   let parts = lessPrettyTypeCtx as Open <>> [] in
   group $ align $ enclose "[" "]" $
     flatAlt
-      (neutral <++> concatWith (surround $ line <+> "," <++> neutral) parts <+> line)
-      (concatWith (surround $ "," <++> neutral) parts)
+      (neutral <++> concatWith (surround $ line <+> ";" <++> neutral) parts <+> line)
+      (concatWith (surround $ ";" <++> neutral) parts)
 lessPrettyType (TFix x a) d =
   group $ align $ hang 2 $ parens $
     "\\" <+> pretty x <++> "=>" <+> line <+>

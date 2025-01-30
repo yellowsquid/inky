@@ -37,6 +37,7 @@ data InkyKind
   | FoldCase
   | Fold
   | By
+  | Data
   | Nat
   | List
   | Suc
@@ -78,6 +79,7 @@ Eq InkyKind where
   FoldCase == FoldCase = True
   Fold == Fold = True
   By == By = True
+  Data == Data = True
   Nat == Nat = True
   List == List = True
   Suc == Suc = True
@@ -120,6 +122,7 @@ Interpolation InkyKind where
   interpolate FoldCase = "'foldcase'"
   interpolate Fold = "'fold'"
   interpolate By = "'by'"
+  interpolate Data = "'Data'"
   interpolate Nat = "'Nat'"
   interpolate List = "'List'"
   interpolate Suc = "'suc'"
@@ -167,6 +170,7 @@ TokenKind InkyKind where
   tokValue FoldCase = const ()
   tokValue Fold = const ()
   tokValue By = const ()
+  tokValue Data = const ()
   tokValue Nat = const ()
   tokValue List = const ()
   tokValue Suc = const ()
@@ -204,6 +208,7 @@ keywords =
   , ("foldcase", FoldCase)
   , ("fold", Fold)
   , ("by", By)
+  , ("data", Data)
   , ("Nat", Nat)
   , ("List", List)
   , ("suc", Suc)
@@ -393,17 +398,6 @@ parseList3 (x :: xs) =
 
 -- Types -----------------------------------------------------------------------
 
-OpenOrFixpointType : TypeParser [<] [<"openType"]
-OpenOrFixpointType =
-  OneOf
-    [ mkFix <$>
-      Seq [match Backslash, match TypeIdent, match DoubleArrow, Var (%%% "openType")]
-    , Var (%%% "openType")
-    ]
-  where
-  mkFix : HList [(), String, (), TypeFun] -> TypeFun
-  mkFix [_, x, _, a] = MkParseFun (\ctx => TFix x <$> a.try (ctx :< x))
-
 AtomType : TypeParser [<"openType"] [<]
 AtomType =
   OneOf
@@ -411,7 +405,7 @@ AtomType =
     , MkParseFun (\_ => Ok TNat) <$ match Nat
     , mkProd <$> enclose (match AngleOpen) (match AngleClose) row
     , mkSum <$> enclose (match BracketOpen) (match BracketClose) row
-    , enclose (match ParenOpen) (match ParenClose) OpenOrFixpointType
+    , enclose (match ParenOpen) (match ParenClose) (Var (%%% "openType"))
     ]
   where
   row : InkyParser True [<] [<"openType" :- TypeFun] (List $ WithBounds $ Assoc TypeFun)
@@ -428,10 +422,18 @@ AppType =
   OneOf
     [ AtomType
     , match List **> mkList <$> weaken (S Z) AtomType
+    , mkFix <$> Seq
+      [ match Data
+      , match TypeIdent
+      , weaken (S Z) AtomType
+      ]
     ]
   where
   mkList : TypeFun -> TypeFun
   mkList x = MkParseFun (\ctx => TList <$> x.try ctx)
+
+  mkFix : HList [(), String, TypeFun] -> TypeFun
+  mkFix [_, x, a] = MkParseFun (\ctx => TFix x <$> a.try (ctx :< x))
 
 export
 OpenType : TypeParser [<] [<]

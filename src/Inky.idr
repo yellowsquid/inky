@@ -76,7 +76,7 @@ readFileOrStdin (Just path) = withFile path Read throw readFile
 lexInkyString : HasErr (WithBounds String) es => String -> App es (List (WithBounds InkyToken))
 lexInkyString file = do
   let (tokens, _, _, "") = lex tokenMap file
-    | (_, line, col, rest) => 
+    | (_, line, col, rest) =>
       throw (MkBounded "unexpected character" False (MkBounds line col line col))
   pure (filter (\x => relevant x.val.kind) tokens)
 

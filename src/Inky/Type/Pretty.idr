@@ -78,9 +78,8 @@ lessPrettyType (TSum (MkRow as _)) d =
       (neutral <++> concatWith (surround $ line <+> ";" <++> neutral) parts <+> line)
       (concatWith (surround $ ";" <++> neutral) parts)
 lessPrettyType (TFix x a) d =
-  group $ align $ hang 2 $ parens $
-    "\\" <+> pretty x <++> "=>" <+> line <+>
-    prettyType a Open
+  group $ align $ hang 2 $ parenthesise (d < App) $
+    pretty "data" <++> pretty x <+> line <+> prettyType a Atom
 
 lessPrettyTypeCtx [<] d = [<]
 lessPrettyTypeCtx (as :< (x :- a)) d =

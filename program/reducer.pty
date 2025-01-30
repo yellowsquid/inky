@@ -1,17 +1,17 @@
 Nat ->
-(\T =>
+data T
   [ Var: Nat
   ; Zero: <>
   ; Suc: T
   ; Primrec: <Zero: T; Suc: T; Target: T>
   ; Abs: T
   ; App: <Fun: T; Arg: T>
-  ]) ->
-(\T =>
+  ] ->
+data T
   [ Var: Nat
   ; Zero: <>
   ; Suc: T
   ; Primrec: <Zero: T; Suc: T; Target: T>
   ; Abs: T
   ; App: <Fun: T; Arg: T>
-  ])
+  ]

@@ -1,14 +1,14 @@
 let Bool = [T: <>; F: <>] in
 let or (x : Bool) (y : Bool) : Bool = case x of {T u => T <>; F u => y} in
 let SysT =
-  (\T =>
+  data T
     [ Var: Nat
     ; Zero: <>
     ; Suc: T
     ; Primrec: <Zero: T; Suc: T; Target: T>
     ; Abs: T
     ; App: <Fun: T; Arg: T>
-    ])
+    ]
 in
 let Stepped = <Term: SysT; Smaller: Bool> in
 let lift (f : Nat -> Nat) (n : Nat) : Nat =

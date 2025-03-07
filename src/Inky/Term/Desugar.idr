@@ -1,8 +1,10 @@
 module Inky.Term.Desugar
 
 import Control.Monad.State
+import Data.DPair
 import Data.SortedMap
 import Inky.Term
+import Inky.Term.Rename
 
 -- Other Sugar -----------------------------------------------------------------
 
@@ -131,6 +133,16 @@ desugar' (Cons meta t u) =
   let f = cons meta in
   [| f (desugar' t) (desugar' u) |]
 desugar' (Str meta str) = string meta str
+desugar' (FoldCase meta e (MkRow ts fresh)) =
+  let
+    f = \e, ts =>
+      Fold meta e ("__tmp" **
+        Case meta (Var meta (toVar Here))
+          (fromAll
+            (mapProperty (map (bimap id (rename Rename.NoSugar (Keep (Drop Thinning.Id))))) ts)
+            fresh))
+  in
+  [| f (desugar' e) (desugarBranches ts) |]
 
 desugarAll [] = pure []
 desugarAll (t :: ts) = [| desugar' t :: desugarAll ts |]

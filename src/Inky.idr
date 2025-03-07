@@ -80,49 +80,51 @@ lexInkyString file = do
       throw (MkBounded "unexpected character" False (MkBounds line col line col))
   pure (filter (\x => relevant x.val.kind) tokens)
 
-Interpolation (List InkyKind) where
-  interpolate [t] = interpolate t
-  interpolate ts = "one of " ++ joinBy ", " (map interpolate ts)
+ParseErr : Type
+ParseErr = ParseErr (WithBounds InkyError) InkyKind
 
 doParse :
-  HasErr (WithBounds String) es =>
+  (e : HasErr (List1 ParseErr) es) =>
   (p : InkyParser False [<] [<] a) ->
-  {auto 0 wf : collectTypeErrs @{ListSet} [<] [<] [<] [<] p = []} ->
+  {auto 0 wf : WellFormed ListSet p} ->
   List (WithBounds InkyToken) ->
-  App es a
-doParse p toks =
-  case parse @{ListSet} p toks of
+  (s : state) ->
+  App es (a s)
+doParse p toks s =
+  case (parse ListSet p).runParser s toks of
     Ok res [] _ => pure res
-    Ok res (x :: _) _ =>
-      throw ("expected end of input; got token \{x.val.kind}" <$ x)
-    Err err => throw (parseErrToString err)
-  where
-  parseErrToString : ParseErr InkyKind -> WithBounds String
-  parseErrToString (BadEOF ts) =
-    irrelevantBounds "expected \{ts}; got end of input"
-  parseErrToString (Unexpected ts got) =
-    "expected \{ts}; got token \{got.val.kind}" <$ got
+    Ok res (x :: _) _ => throw @{e} (Unexpected [] x ::: [])
+    SoftErr errs _ _ => throw errs
+    Err errs => throw errs
 
 parseType :
-  Has [HasErr (WithBounds String), HasErr Err, HasErr IOError, FileIO] es =>
+  Has
+    [ HasErr (WithBounds String)
+    , HasErr (List1 ParseErr)
+    , HasErr Err
+    , HasErr IOError
+    , FileIO
+    ] es =>
   Maybe FilePath -> App es (Ty [<])
 parseType path = do
   txt <- readFileOrStdin path
   toks <- lexInkyString txt
-  res <- doParse OpenType toks
-  let Ok a = res.try [<]
-    | Errs errs => throw errs
-  pure a
+  doParse OpenType toks [<]
 
 parseTerm :
-  Has [HasErr (WithBounds String), HasErr Err, HasErr IOError, FileIO] es =>
-  (termPath, tyPath : Maybe FilePath) -> App es (Term (Sugar [<]) Bounds [<] [<])
+  Has
+    [ HasErr (WithBounds String)
+    , HasErr (List1 ParseErr)
+    , HasErr Err
+    , HasErr IOError
+    , FileIO
+    ] es =>
+  (termPath, tyPath : Maybe FilePath) ->
+  App es (Term (Sugar [<]) Bounds [<] [<])
 parseTerm termPath tyPath = do
   txt <- readFileOrStdin termPath
   toks <- lexInkyString txt
-  res <- doParse OpenTerm toks
-  let Ok t = res.try (Sugar [<]) [<] [<]
-    | Errs errs => throw errs
+  t <- doParse OpenTerm toks (Sugar [<], [<], [<])
   -- Annotate with type
   let Just _ = tyPath
     | Nothing => pure t
@@ -237,6 +239,7 @@ process :
     [ HasErr String
     , HasErr (WithBounds String)
     , HasErr (List1 $ WithBounds String)
+    , HasErr (List1 $ ParseErr)
     , HasErr (List1 ErrorMsg)
     , HasErr SynthFailed
     , FileIO
@@ -314,6 +317,11 @@ printSynthFailed (UhOh t err) =
   map (\(bounds, msg) => group $ align $ hang 2 $ pretty "\{bounds}:" <+> line <+> msg) $
   prettyNotSynths err
 
+Interpolation (List InkyKind) where
+  interpolate [] = "end of input"
+  interpolate [t] = interpolate t
+  interpolate ts = "one of " ++ joinBy ", " (map interpolate ts)
+
 main : IO ()
 main =
   run {l = MayThrow} $
@@ -327,6 +335,8 @@ main =
     (throw . map show . forget) $
   handleErr (List1 $ WithBounds String)
     (throw . map interpolate . forget) $
+  handleErr (List1 ParseErr)
+    (throw . map errToString . forget) $
   handleErr (WithBounds String)
     (throw . (::: [])) $
   handleErr IOError
@@ -336,7 +346,19 @@ main =
       printSynthFailed err
       primIO exitFailure) $
   process
-
--- main =
---   run {l = MayThrow} $
---   handle
+  where
+  errToString : ParseErr -> String
+  errToString (BadEOF expected) = "expected \{expected}, got end of input"
+  errToString (Unexpected expected got) =
+    interpolate ("expected \{expected}, got \{got.val.kind}" <$ got)
+  errToString (MapFail e) =
+    let
+      msg =
+        case e.val of
+          (UnboundTyVar str ctx) => "unbound type variable '\{str}'"
+          (UnboundTmVar str ctx) => "unbound term variable '\{str}'"
+          (DuplicateLabel str labels) => "repeated label '\{str}'"
+          (NeedsSugar mode) => "cannot use syntactic sugar here"
+          (NeedsQuote mode) => "cannot use splicing here"
+          NoQuotedTypes => "cannot write types within quotations"
+    in interpolate (msg <$ e)

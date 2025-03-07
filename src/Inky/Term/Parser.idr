@@ -272,178 +272,109 @@ tokenMap =
 -- Error Monad -----------------------------------------------------------------
 
 public export
-data Result : (a : Type) -> Type where
-  Ok : a -> Result a
-  Errs : (msgs : List1 (WithBounds String)) -> Result a
-
-export
-Functor Result where
-  map f (Ok x) = Ok (f x)
-  map f (Errs msgs) = Errs msgs
-
-export
-Applicative Result where
-  pure = Ok
-
-  Ok f <*> Ok x = Ok (f x)
-  Ok f <*> Errs msgs = Errs msgs
-  Errs msgs <*> Ok x = Errs msgs
-  Errs msgs1 <*> Errs msgs2 = Errs (msgs1 ++ msgs2)
-
-export
-Monad Result where
-  Ok x >>= f = f x
-  Errs msgs >>= f = Errs msgs
-
-  join (Ok x) = x
-  join (Errs msgs) = Errs msgs
-
-export
-extendResult : Row a -> WithBounds (Assoc (Result a)) -> Result (Row a)
-extendResult row x =
-  case (isFresh row.names x.val.name) of
-    True `Because` prf => Ok ((:<) row (x.val.name :- !x.val.value) @{prf})
-    False `Because` _ =>
-      [| const (Errs $ singleton $ "duplicate name \"\{x.val.name}\"" <$ x) x.val.value |]
+data InkyError : Type where
+  UnboundTyVar : String -> SnocList String -> InkyError
+  UnboundTmVar : String -> SnocList String -> InkyError
+  DuplicateLabel : String -> SnocList String -> InkyError
+  NeedsSugar : Mode -> InkyError
+  NeedsQuote : Mode -> InkyError
+  NoQuotedTypes : InkyError
 
 -- Parser ----------------------------------------------------------------------
 
+%inline
 public export
-InkyParser : Bool -> Context Type -> Context Type -> (a : Type) -> Type
+TermState : Type
+TermState = (Mode, SnocList String, SnocList String)
+
+%inline
+public export
+Term' : (Mode, SnocList String, SnocList String) -> Type
+Term' state = Term (fst state) Bounds (fst $ snd state) (snd $ snd state)
+
+%inline
+public export
+InkyParser :
+  {state : Type} -> (nil : Bool) ->
+  (locked, free : Context (state -> Type)) -> (a : state -> Type) -> Type
 InkyParser nil locked free a =
-  Parser InkyKind nil
+  Parser state (WithBounds InkyError) InkyKind nil
     (map (map (False,)) locked)
     (map (map (False,)) free)
     a
 
-public export
-record ParseFun (as : SnocList Type) (0 p : Fun as Type) where
-  constructor MkParseFun
-  try : DFun as (chain (lengthOf as) Parser.Result p)
-
-mkVar : ({ctx : _} -> Var ctx -> p ctx) -> WithBounds String -> ParseFun [<SnocList String] p
-mkVar f x =
-  MkParseFun
-    (\ctx => case Var.lookup x.val ctx of
-      Just i => Ok (f i)
-      Nothing => Errs (singleton $ "unbound name \"\{x.val}\"" <$ x))
-
-mkVar3 :
-  ({ctx1 : a} -> {ctx2 : b} -> {ctx3 : SnocList String} ->
-    WithBounds (Var ctx3) ->
-    p ctx1 ctx2 ctx3) ->
-  WithBounds String -> ParseFun [<a, b, SnocList String] p
-mkVar3 f x =
-  MkParseFun
-    (\ctx1, ctx2, ctx3 => case Var.lookup x.val ctx3 of
-      Just i => Ok (f $ i <$ x)
-      Nothing => Errs (singleton $ "unbound name \"\{x.val}\"" <$ x))
-
-public export
-TypeFun : Type
-TypeFun = ParseFun [<SnocList String] Ty
-
-Type'Fun : Type
-Type'Fun = ParseFun [<Mode, SnocList String, SnocList String] (\mode => Ty' mode Bounds)
-
-BoundType'Fun : Type
-BoundType'Fun = ParseFun [<Mode, SnocList String, SnocList String] (\mode => BoundTy' mode Bounds)
-
-public export
-TermFun : Type
-TermFun = ParseFun [<Mode, SnocList String, SnocList String] (\mode => Term mode Bounds)
-
+%inline
 public export
 TypeParser : SnocList String -> SnocList String -> Type
-TypeParser locked free =
-  InkyParser False (map (:- TypeFun) locked) (map (:- TypeFun) free) TypeFun
+TypeParser locked free = InkyParser False (map (:- Ty) locked) (map (:- Ty) free) Ty
+
+%inline
+public export
+TermParser : SnocList String -> SnocList String -> Type
+TermParser locked free = InkyParser False (map (:- Term') locked) (map (:- Term') free) Term'
+
+mkTyVar : {ctx : _} -> WithBounds String -> Either (WithBounds InkyError) (Ty ctx)
+mkTyVar x =
+  case Var.lookup x.val ctx of
+    Just i => pure (TVar i)
+    Nothing => Left (UnboundTyVar x.val ctx <$ x)
+
+mkTmVar :
+  {state : _} ->
+  WithBounds String ->
+  Either (WithBounds InkyError) (Term' state)
+mkTmVar {state = (mode, tyCtx, tmCtx)} x =
+  case Var.lookup x.val tmCtx of
+    Just i => pure (Var x.bounds i)
+    Nothing => Left (UnboundTmVar x.val tmCtx <$ x)
 
 RowOf :
-  (0 free : Context Type) ->
+  (0 free : Context (state -> Type)) ->
   InkyParser False [<] free a ->
-  InkyParser True [<] free (List $ WithBounds $ Assoc a)
+  InkyParser True [<] free (List . WithBounds . Assoc . a)
 RowOf free p =
-  sepBy (match Semicolon) (WithBounds $ mkAssoc <$> Seq [match TypeIdent, match Colon, p])
-  where
-  mkAssoc : HList [String, (), a] -> Assoc a
-  mkAssoc [x, _, v] = x :- v
+  sepBy (match Semicolon)
+    (WithBounds $ (\[x, _, v] => x :- v) <$> Seq [match TypeIdent, match Colon, p])
 
-parseRow :
-  List (WithBounds $ Assoc (ParseFun [<a] p)) ->
-  ParseFun [<a] (Row . p)
-parseRow xs =
-  MkParseFun (\ctx =>
-    foldlM
-      (\row => extendResult row . map (\(n :- x) => n :- x.try ctx))
-      [<]
-      xs)
-
-parseRow3 :
-  List (WithBounds $ Assoc (ParseFun [<a,b,c] p)) ->
-  ParseFun [<a, b, c] (\ctx1, ctx2, ctx3 => Row $ p ctx1 ctx2 ctx3)
-parseRow3 xs =
-  MkParseFun (\ctx1, ctx2, ctx3 =>
-    foldlM
-      (\row => extendResult row . map (\(n :- x) => n :- x.try ctx1 ctx2 ctx3))
-      [<]
-      xs)
-
-parseList3 :
-  List (ParseFun [<a,b,c] p) ->
-  ParseFun [<a, b, c] (\ctx1, ctx2, ctx3 => List $ p ctx1 ctx2 ctx3)
-parseList3 [] = MkParseFun (\ctx1, ctx2, ctx3 => Ok [])
-parseList3 (x :: xs) =
-  MkParseFun (\ctx1, ctx2, ctx3 =>
-    [| x.try ctx1 ctx2 ctx3 :: (parseList3 xs).try ctx1 ctx2 ctx3 |])
+mkRow :
+  List (WithBounds $ Assoc a) ->
+  Either (WithBounds InkyError) (Row a)
+mkRow =
+  foldlM
+    (\row, x => case extend row x.val of
+      Just row => pure row
+      Nothing => Left (DuplicateLabel x.val.name row.names <$ x))
+    [<]
 
 -- Types -----------------------------------------------------------------------
 
 AtomType : TypeParser [<"openType"] [<]
 AtomType =
   OneOf
-    [ mkVar TVar <$> WithBounds (match TypeIdent)
-    , MkParseFun (\_ => Ok TNat) <$ match Nat
-    , mkProd <$> enclose (match AngleOpen) (match AngleClose) row
-    , mkSum <$> enclose (match BracketOpen) (match BracketClose) row
+    [ Map mkTyVar $ WithBounds (match TypeIdent)
+    , TNat <$ match Nat
+    , TProd <$> enclose (match AngleOpen) (match AngleClose) row
+    , TSum <$> enclose (match BracketOpen) (match BracketClose) row
     , enclose (match ParenOpen) (match ParenClose) (Var (%%% "openType"))
     ]
   where
-  row : InkyParser True [<] [<"openType" :- TypeFun] (List $ WithBounds $ Assoc TypeFun)
-  row = RowOf [<"openType" :- TypeFun] $ Var (%%% "openType")
-
-  mkProd : List (WithBounds $ Assoc TypeFun) -> TypeFun
-  mkProd xs = MkParseFun (\ctx => TProd <$> (parseRow xs).try ctx)
-
-  mkSum : List (WithBounds $ Assoc TypeFun) -> TypeFun
-  mkSum xs = MkParseFun (\ctx => TSum <$> (parseRow xs).try ctx)
+  row : InkyParser True [<] [<"openType" :- Ty] (Row . Ty)
+  row = Map mkRow $ RowOf [<"openType" :- Ty] $ Var (%%% "openType")
 
 AppType : TypeParser [<"openType"] [<]
 AppType =
   OneOf
     [ AtomType
-    , match List **> mkList <$> weaken (S Z) AtomType
-    , mkFix <$> Seq
-      [ match Data
-      , match TypeIdent
-      , weaken (S Z) AtomType
-      ]
+    , match List *> TList <$> weaken (S Z) AtomType
+    , match Data *> (\[x, t] => TFix x t) <$>
+        Seq (Update (match TypeIdent) (Just (:<)) [weaken (S Z) AtomType])
     ]
   where
-  mkList : TypeFun -> TypeFun
-  mkList x = MkParseFun (\ctx => TList <$> x.try ctx)
-
-  mkFix : HList [(), String, TypeFun] -> TypeFun
-  mkFix [_, x, a] = MkParseFun (\ctx => TFix x <$> a.try (ctx :< x))
 
 export
 OpenType : TypeParser [<] [<]
 OpenType =
-  Fix "openType" $ mkArrow <$> sepBy1 (match Arrow) AppType
-  where
-  mkArrow : List1 TypeFun -> TypeFun
-  mkArrow =
-    foldr1 {a = TypeFun}
-      (\x, y => MkParseFun (\ctx => [| TArrow (x.try ctx) (y.try ctx) |]))
+  Fix "openType" $ foldr1 TArrow <$> sepBy1 (match Arrow) AppType
 
 export
 [ListSet] Eq a => Set a (List a) where
@@ -462,483 +393,329 @@ OpenTypeWf = Refl
 
 -- Terms -----------------------------------------------------------------------
 
-NoSugarMsg : String
-NoSugarMsg = "sugar is not allowed here"
+Type' : (Mode, SnocList String, SnocList String) -> Type
+Type' state = Ty' (fst state) Bounds (fst $ snd state) (snd $ snd state)
 
-NoUnquoteMsg : String
-NoUnquoteMsg = "cannot unquote outside of quote"
+BoundType' : (Mode, SnocList String, SnocList String) -> Type
+BoundType' state = BoundTy' (fst state) Bounds (fst $ snd state) (snd $ snd state)
 
-NoQuoteMsg : String
-NoQuoteMsg = "cannot quote inside of quote"
+sugarOnly :
+  (0 a, b : (Mode, SnocList String, SnocList String) -> Type) ->
+  ({qtCtx, tyCtx, tmCtx : _} ->
+    WithBounds (a (Sugar qtCtx, tyCtx, tmCtx)) ->
+    b (Sugar qtCtx, tyCtx, tmCtx)) ->
+  {state : _} -> WithBounds (a state) -> Either (WithBounds InkyError) (b state)
+sugarOnly a b f {state = (Sugar qtCtx, tyCtx, tmCtx)} x = pure (f x)
+sugarOnly a b f {state = (mode, tyCtx, tmCtx)} x = Left (NeedsSugar mode <$ x)
 
-NoQuoteTypesMsg : String
-NoQuoteTypesMsg = "cannot quote types"
+quoteOnly :
+  (0 a, b : (Mode, SnocList String, SnocList String) -> Type) ->
+  ({ctx1, ctx2, tmCtx : _} ->
+    WithBounds (a (Quote ctx1 ctx2, [<], tmCtx)) ->
+    b (Quote ctx1 ctx2, [<], tmCtx)) ->
+  {state : _} -> WithBounds (a state) -> Either (WithBounds InkyError) (b state)
+-- HACK: should special case for tyCtx /= [<]. But this case is "impossible", so it doesn't matter
+quoteOnly a b f {state = (Quote ctx1 ctx2, [<], tmCtx)} x = pure (f x)
+quoteOnly a b f {state = (mode, tyCtx, tmCtx)} x = Left (NeedsQuote mode <$ x)
 
-NoLetTyMsg : String
-NoLetTyMsg = "cannot bind type inside of quote"
+forceQuote :
+  (Mode, SnocList String, SnocList String) -> (Mode, SnocList String, SnocList String)
+forceQuote (Sugar qtCtx, tyCtx, tmCtx) = (Quote tyCtx tmCtx, [<], qtCtx)
+forceQuote state = state
 
-NoQAbsMsg : String
-NoQAbsMsg = "cannot bind term name inside of quote"
+forceSugar :
+  (Mode, SnocList String, SnocList String) -> (Mode, SnocList String, SnocList String)
+forceSugar (Quote ctx1 ctx2, tyCtx, tmCtx) = (Sugar tmCtx, ctx1, ctx2)
+forceSugar state = state
 
-AtomTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
+embedType :
+  {state : _} ->
+  WithBounds (Ty (fst $ snd state)) ->
+  Either (WithBounds InkyError) (Type' state)
+embedType {state = (Quote ctx1 ctx2, tyCtx, tmCtx)} t = Left (NoQuotedTypes <$ t)
+embedType {state = (Sugar qtCtx, tyCtx, tmCtx)} t = Right t.val
+embedType {state = (NoSugar, tyCtx, tmCtx)} t = Right t.val
+
+AtomTerm : TermParser [<"openTerm"] [<]
 AtomTerm =
   OneOf
-    [ mkVar3 (\x => Var x.bounds x.val) <$> WithBounds (match TermIdent)
-    , mkStrLit <$> WithBounds (match StringLit)
-    , mkLit <$> WithBounds (match Lit)
-    , mkList <$> WithBounds (
+    [ Map mkTmVar $ WithBounds (match TermIdent)
+    , Map (sugarOnly (const String) Term' (\k => Str k.bounds k.val)) $
+      WithBounds (match StringLit)
+    , Map (sugarOnly (const Nat) Term' (\k => Lit k.bounds k.val)) $
+      WithBounds (match Lit)
+    , Map (sugarOnly (List . Term') Term' (\ts => List ts.bounds ts.val)) $ WithBounds (
         enclose (match BracketOpen) (match BracketClose) $
-        sepBy (match Semicolon) $
-        Var (%%% "openTerm"))
-    , mkTup <$> WithBounds (enclose (match AngleOpen) (match AngleClose) $
-        RowOf [<"openTerm" :- TermFun] (Var (%%% "openTerm")))
+        sepBy (match Semicolon) $ Var (%%% "openTerm"))
+    , (\row => Tup row.bounds row.val) <$> WithBounds (
+        enclose (match AngleOpen) (match AngleClose) $
+        Map mkRow $ RowOf [<"openTerm" :- Term'] (Var (%%% "openTerm")))
     , enclose (match ParenOpen) (match ParenClose) (Var (%%% "openTerm"))
     ]
-  where
-  mkStrLit : WithBounds String -> TermFun
-  mkStrLit k = MkParseFun (\mode, tyCtx, tmCtx =>
-    case mode of
-      NoSugar => Errs (singleton $ NoSugarMsg <$ k)
-      Sugar qtCtx => Ok (Str k.bounds k.val)
-      Quote ctx1 ctx2 => Errs (singleton $ NoSugarMsg <$ k))
 
-  mkLit : WithBounds Nat -> TermFun
-  mkLit k = MkParseFun (\mode, tyCtx, tmCtx =>
-    case mode of
-      NoSugar => Errs (singleton $ NoSugarMsg <$ k)
-      Sugar qtCtx => Ok (Lit k.bounds k.val)
-      Quote ctx1 ctx2 => Errs (singleton $ NoSugarMsg <$ k))
-
-  mkList : WithBounds (List TermFun) -> TermFun
-  mkList xs = MkParseFun (\mode, tyCtx, tmCtx =>
-    case mode of
-      NoSugar => Errs (singleton $ NoSugarMsg <$ xs)
-      Sugar ctx => List xs.bounds <$> (parseList3 xs.val).try (Sugar ctx) tyCtx tmCtx
-      Quote ctx1 ctx2 => Errs (singleton $ NoSugarMsg <$ xs))
-
-  mkTup : WithBounds (List (WithBounds $ Assoc TermFun)) -> TermFun
-  mkTup xs =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      Tup xs.bounds <$> (parseRow3 xs.val).try mode tyCtx tmCtx)
-
-PrefixTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
+PrefixTerm : TermParser [<"openTerm"] [<]
 PrefixTerm =
   Fix "prefixTerm" $ OneOf
-    [ mkRoll <$> WithBounds (match Tilde **> Var (%%% "prefixTerm"))
-    , mkUnroll <$> WithBounds (match Bang **> Var (%%% "prefixTerm"))
-    , mkQuote <$> WithBounds (match Backtick **> Var (%%% "prefixTerm"))
-    , mkUnquote <$> WithBounds (match Comma **> Var (%%% "prefixTerm"))
+    [ (\t => Roll t.bounds t.val) <$> WithBounds (match Tilde *> Var (%%% "prefixTerm"))
+    , (\t => Unroll t.bounds t.val) <$> WithBounds (match Bang *> Var (%%% "prefixTerm"))
+    , Map (sugarOnly (Term' . forceQuote) Term' (\t => QuasiQuote t.bounds t.val)) $
+        WithBounds $ (\[_, t] => t) <$>
+        Seq (Update (match Backtick) (Just $ const . forceQuote) [Var (%%% "prefixTerm")])
+    , Map (quoteOnly (Term' . forceSugar) Term' (\t => Unquote t.bounds t.val)) $
+        WithBounds $ (\[_, t] => t) <$>
+        Seq (Update (match Comma) (Just $ const . forceSugar) [Var (%%% "prefixTerm")])
     , rename (Drop Id) Id AtomTerm
     ]
-  where
-  mkRoll : WithBounds TermFun -> TermFun
-  mkRoll x = MkParseFun (\mode, tyCtx, tmCtx => Roll x.bounds <$> x.val.try mode tyCtx tmCtx)
 
-  mkUnroll : WithBounds TermFun -> TermFun
-  mkUnroll x = MkParseFun (\mode, tyCtx, tmCtx => Unroll x.bounds <$> x.val.try mode tyCtx tmCtx)
+SuffixTerm : TermParser [<"openTerm"] [<]
+SuffixTerm =
+  (\[t, prjs] => foldl (\t, l => Prj l.bounds t l.val) t prjs) <$>
+  Seq [PrefixTerm , star (match Dot *> WithBounds (match TypeIdent)) ]
 
-  mkQuote : WithBounds TermFun -> TermFun
-  mkQuote x =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      case mode of
-        Quote ctx1 ctx2 => Errs (singleton $ NoQuoteMsg <$ x)
-        Sugar ctx => QuasiQuote x.bounds <$> x.val.try (Quote tyCtx tmCtx) [<] ctx
-        NoSugar => Errs (singleton $ NoSugarMsg <$ x))
-
-  mkUnquote : WithBounds TermFun -> TermFun
-  mkUnquote x =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      case mode of
-        Quote ctx1 ctx2 =>
-          case tyCtx of
-            [<] => Unquote x.bounds <$> x.val.try (Sugar tmCtx) ctx1 ctx2
-            _ => Errs (singleton $ "internal error 0001" <$ x)
-        Sugar ctx => Errs (singleton $ NoUnquoteMsg <$ x)
-        NoSugar => Errs (singleton $ NoSugarMsg <$ x))
-
-SuffixTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
-SuffixTerm = mkSuffix <$> Seq [ PrefixTerm , star (match Dot **> WithBounds (match TypeIdent)) ]
-  where
-  mkSuffix : HList [TermFun, List (WithBounds String)] -> TermFun
-  mkSuffix [t, []] = t
-  mkSuffix [t, prjs] =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      Ok $ foldl (\acc, l => Prj l.bounds acc l.val) !(t.try mode tyCtx tmCtx) prjs)
-
-SuffixTy' : InkyParser False [<"openTerm" :- TermFun] [<] Type'Fun
+SuffixTy' : InkyParser False [<"openTerm" :- Term'] [<] Type'
 SuffixTy' =
   OneOf
-    [ mkTy <$> WithBounds (sub [<"openType" :- rename Id (Drop Id) OpenType] [<] AtomType)
-    , mkTm <$> WithBounds (match Comma **> weaken (S Z) PrefixTerm)
+    [ Map embedType $ Forget (fst . snd) $ WithBounds $ sub [<"openType" :- OpenType] [<] AtomType
+    , Map (quoteOnly (Term' . forceSugar) Type' val) $
+        WithBounds $ (\[_, t] => t) <$>
+        Seq (Update (match Comma) (Just $ const . forceSugar) [weaken (S Z) PrefixTerm])
     ]
-  where
-  mkTy : WithBounds TypeFun -> Type'Fun
-  mkTy x =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      case mode of
-        Quote ctx1 ctx2 => Errs (singleton $ NoQuoteTypesMsg <$ x)
-        Sugar ctx => x.val.try tyCtx
-        NoSugar => x.val.try tyCtx)
 
-  mkTm : WithBounds TermFun -> Type'Fun
-  mkTm x =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      case mode of
-        Quote ctx1 ctx2 => x.val.try (Sugar tmCtx) ctx1 ctx2
-        Sugar ctx => Errs (singleton $ NoUnquoteMsg <$ x)
-        NoSugar => Errs (singleton $ NoSugarMsg <$ x))
-
-SuffixBoundTy' : InkyParser False [<"openTerm" :- TermFun] [<] BoundType'Fun
+SuffixBoundTy' : InkyParser False [<"openTerm" :- Term'] [<] BoundType'
 SuffixBoundTy' =
-  OneOf
-    [ mkTy <$> enclose (match ParenOpen) (match ParenClose) (Seq
-      [ WithBounds (match Backslash)
-      , match TypeIdent
-      , match DoubleArrow
-      , rename Id (Drop Id) OpenType
-      ])
-    , mkTm <$> WithBounds (match Comma **> weaken (S Z) PrefixTerm)
+  OneOf {nils = [False, False]}
+    [ enclose (match ParenOpen) (match ParenClose) $
+      Map embedBoundType $
+      Forget (fst . snd) $
+      WithBounds {a = \ctx => (x ** Ty (ctx :< x))} $
+      (\[n, t] => (n ** t)) <$>
+      Seq (Update (match Backslash *> match TypeIdent <* match DoubleArrow) (Just (:<)) [OpenType])
+    , Map (quoteOnly (Term' . forceSugar) BoundType' val) $
+        WithBounds $ (\[_, t] => t) <$>
+        Seq (Update (match Comma) (Just $ const . forceSugar) [weaken (S Z) PrefixTerm])
     ]
   where
-  mkTy : HList [WithBounds _, String, _, TypeFun] -> BoundType'Fun
-  mkTy [x, n, _, a] =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      case mode of
-        Quote ctx1 ctx2 => Errs (singleton $ NoQuoteTypesMsg <$ x)
-        Sugar ctx => MkDPair n <$> a.try (tyCtx :< n)
-        NoSugar => MkDPair n <$> a.try (tyCtx :< n))
+  embedBoundType :
+    {state : _} ->
+    WithBounds (x ** Ty (fst (snd state) :< x)) ->
+    Either (WithBounds InkyError) (BoundType' state)
+  embedBoundType {state = (Quote ctx1 ctx2, tyCtx, tmCtx)} t = Left (NoQuotedTypes <$ t)
+  embedBoundType {state = (Sugar qtCtx, tyCtx, tmCtx)} t = Right t.val
+  embedBoundType {state = (NoSugar, tyCtx, tmCtx)} t = Right t.val
 
-  mkTm : WithBounds TermFun -> BoundType'Fun
-  mkTm x =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      case mode of
-        Quote ctx1 ctx2 => x.val.try (Sugar tmCtx) ctx1 ctx2
-        Sugar ctx => Errs (singleton $ NoUnquoteMsg <$ x)
-        NoSugar => Errs (singleton $ NoSugarMsg <$ x))
-
-AppTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
+AppTerm : TermParser [<"openTerm"] [<]
 AppTerm =
   OneOf
-    [ mkInj <$> Seq
-      [ WithBounds (match TypeIdent)
-      , weaken (S Z) SuffixTerm
-      ]
-    , mkSuc <$> Seq
-      [ WithBounds (match Suc)
-      , weaken (S Z) SuffixTerm
-      ]
-    , mkCons <$> Seq
-      [ WithBounds (match Cons)
-      , weaken (S Z) SuffixTerm
-      , weaken (S Z) SuffixTerm
-      ]
-    , mkApp <$> Seq
-      [ OneOf
-        [ WithBounds SuffixTerm
-        , mkMap <$> Seq
-          [ WithBounds (match Map)
-          , weaken (S Z) SuffixBoundTy'
-          , weaken (S Z) SuffixTy'
-          , weaken (S Z) SuffixTy'
+    [ (\lt => Inj lt.bounds (fst lt.val) (snd lt.val)) <$>
+      WithBounds (match TypeIdent <**> weaken (S Z) SuffixTerm)
+    , Map (sugarOnly Term' Term' (\t => Suc t.bounds t.val)) $
+      WithBounds $ match Suc *> weaken (S Z) SuffixTerm
+    , Map (sugarOnly (\s => (Term' s, Term' s)) Term'
+        (\tu => Cons tu.bounds (fst tu.val) (snd tu.val))) $
+      WithBounds $ match Cons *> weaken (S Z) SuffixTerm <**> weaken (S Z) SuffixTerm
+    , (\case
+        [f, []] => f.val
+        [f, args] => App f.bounds f.val args) <$>
+      Seq
+        [ OneOf
+          [ WithBounds SuffixTerm
+          , (\[x, f, a, b] => Map x.bounds f a b <$ x) <$> Seq
+            [ WithBounds (match Map)
+            , weaken (S Z) SuffixBoundTy'
+            , weaken (S Z) SuffixTy'
+            , weaken (S Z) SuffixTy'
+            ]
           ]
+        , star (weaken (S Z) SuffixTerm)
         ]
-      , star (weaken (S Z) SuffixTerm)
-      ]
     ]
-  where
-  mkInj : HList [WithBounds String, TermFun] -> TermFun
-  mkInj [tag, t] =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      Inj tag.bounds tag.val <$> t.try mode tyCtx tmCtx)
 
-  mkSuc : HList [WithBounds _, TermFun] -> TermFun
-  mkSuc [x, t] =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      case mode of
-        Quote ctx1 ctx2 => Errs (singleton $ NoSugarMsg <$ x)
-        Sugar ctx => Suc x.bounds <$> t.try (Sugar ctx) tyCtx tmCtx
-        NoSugar => Errs (singleton $ NoSugarMsg <$ x))
-
-  mkCons : HList [WithBounds _, TermFun, TermFun] -> TermFun
-  mkCons [x, t, u] =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      case mode of
-        Quote ctx1 ctx2 => Errs (singleton $ NoSugarMsg <$ x)
-        Sugar ctx =>
-          [| Cons (pure x.bounds)
-               (t.try (Sugar ctx) tyCtx tmCtx)
-               (u.try (Sugar ctx) tyCtx tmCtx)
-          |]
-        NoSugar => Errs (singleton $ NoSugarMsg <$ x))
-
-  mkMap :
-    HList [WithBounds (), BoundType'Fun, Type'Fun, Type'Fun] ->
-    WithBounds TermFun
-  mkMap [m, a, b, c] =
-    MkParseFun (\mode, tyCtx, tmCtx => do
-      (a, b, c) <-
-        [| (a.try mode tyCtx tmCtx, [|(b.try mode tyCtx tmCtx, c.try mode tyCtx tmCtx)|]) |]
-      Ok $ Map m.bounds a b c)
-    <$ m
-
-  mkApp : HList [WithBounds TermFun, List TermFun] -> TermFun
-  mkApp [t, []] = t.val
-  mkApp [fun, args] =
-    MkParseFun (\mode, tyCtx, tmCtx => do
-      (funVal, args) <-
-        [| (fun.val.try mode tyCtx tmCtx, (parseList3 args).try mode tyCtx tmCtx) |]
-      Ok $ App fun.bounds funVal args)
-
-OpenTy' : InkyParser False [<"openTerm" :- TermFun] [<] Type'Fun
+OpenTy' : InkyParser False [<"openTerm" :- Term'] [<] Type'
 OpenTy' =
   OneOf
-    [ mkTy <$> WithBounds (rename (Drop Id) Id OpenType)
-    , mkTm <$> WithBounds (match Comma **> weaken (S Z) PrefixTerm)
+    [ Map embedType $ Forget (fst . snd) $ WithBounds OpenType
+    , Map (quoteOnly (Term' . forceSugar) Type' val) $
+      WithBounds $ (\[_, t] => t) <$>
+      Seq (Update (match Comma) (Just $ const . forceSugar) [weaken (S Z) PrefixTerm])
     ]
-  where
-  mkTy : WithBounds TypeFun -> Type'Fun
-  mkTy x =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      case mode of
-        Quote ctx1 ctx2 => Errs (singleton $ NoQuoteTypesMsg <$ x)
-        Sugar ctx => x.val.try tyCtx
-        NoSugar => x.val.try tyCtx)
-
-  mkTm : WithBounds TermFun -> Type'Fun
-  mkTm x =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      case mode of
-        Quote ctx1 ctx2 => x.val.try (Sugar tmCtx) ctx1 ctx2
-        Sugar ctx => Errs (singleton $ NoUnquoteMsg <$ x)
-        NoSugar => Errs (singleton $ NoSugarMsg <$ x))
-
-AnnotTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
-AnnotTerm =
-  mkAnnot <$> Seq
-    [ AppTerm
-    , option (match Colon **> WithBounds (weaken (S Z) OpenTy'))
-    ]
-  where
-  mkAnnot : HList [TermFun, Maybe (WithBounds Type'Fun)] -> TermFun
-  mkAnnot [t, Nothing] = t
-  mkAnnot [t, Just a] = MkParseFun (\mode, tyCtx, tmCtx =>
-    [| Annot (pure a.bounds) (t.try mode tyCtx tmCtx) (a.val.try mode tyCtx tmCtx) |])
 
 -- Open Terms
 
-LetTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
+AnnotTerm : TermParser [<"openTerm"] [<]
+AnnotTerm =
+  (\case
+    (t, Nothing) => t
+    (t, Just a) => Annot a.bounds t a.val) <$>
+  (AppTerm <**> option (WithBounds $ match Colon *> weaken (S Z) OpenTy'))
+
+LetTerm : TermParser [<"openTerm"] [<]
 LetTerm =
-  match Let **>
+  match Let *>
   OneOf
-    [ mkLet <$> Seq
-      [ WithBounds (match TermIdent)
-      , OneOf
-        [ mkAnnot <$> Seq
-          [ star (enclose (match ParenOpen) (match ParenClose) $
-            Seq [ match TermIdent, match Colon, weaken (S Z) OpenTy' ])
-          , WithBounds (match Colon)
-          , weaken (S Z) OpenTy'
-          , match Equal
-          , star (match Comment)
-          , Var (%%% "openTerm")]
-        , mkUnannot <$> Seq [match Equal, star (match Comment) , Var (%%% "openTerm")]
-        ]
-      , match In
-      , Var (%%% "openTerm")
-      ]
-    , mkLetType <$> Seq
-      [ WithBounds (match TypeIdent)
-      , match Equal
-      , star (match Comment)
-      , rename Id (Drop Id) OpenType
-      , match In
-      , Var (%%% "openTerm")
-      ]
+    [ mkLet _ <$> Seq
+      (Update
+        (WithBounds (match TermIdent) <**> OneOf
+          [ mkAnnot _ <$>
+            Seq (Update
+              (Seq
+                [ star (enclose (match ParenOpen) (match ParenClose)
+                  (match TermIdent <* match Colon <**> weaken (S Z) OpenTy'))
+                , WithBounds (match Colon)
+                , weaken (S Z) OpenTy'
+                , match Equal
+                , star (match Comment)
+                ])
+              (Just GetArgs)
+              [Var (%%% "openTerm")])
+          , (\[_, doc, body] => AddDoc body doc) <$>
+            Seq [match Equal, star (match Comment), Var (%%% "openTerm")]
+          ])
+        (Just $ \state, v => mapSnd (mapSnd (:< (fst v).val)) state)
+        [match In *> Var (%%% "openTerm")])
+    , Map (mkLetTy _) $ Seq
+      (Update
+        (WithBounds (match TypeIdent) <**>
+          uncurry (flip AddDoc) <$>
+          (match Equal *> (star (match Comment) <**> Forget (fst . snd) OpenType)))
+        (Just $ \state, v => mapSnd (mapFst (:< (fst v).val)) state)
+        [match In *> Var (%%% "openTerm")])
+
     ]
   where
-  mkLet : HList [WithBounds String, WithDoc TermFun, (), TermFun] -> TermFun
-  mkLet [x, AddDoc e doc, _, t] =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      [| (\e, t => Let (AddDoc x.bounds doc) e (x.val ** t))
-         (e.try mode tyCtx tmCtx)
-         (t.try mode tyCtx (tmCtx :< x.val))
-      |])
+  AnnotSeq : List (Stage TermState)
+  AnnotSeq = map (\a => MkStage a Nothing)
+    [ (\s => List (String, Type' s))
+    , const (WithBounds ())
+    , Type'
+    , const ()
+    , const (List String)
+    ]
 
-  mkLetType : HList [WithBounds String, (), List String, TypeFun, (), TermFun] -> TermFun
-  mkLetType [x, _, doc, a, _, t] =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      case mode of
-        Quote ctx1 ctx2 => Errs (singleton $ NoLetTyMsg <$ x)
-        Sugar ctx =>
-          [| (\a, t => LetTy (AddDoc x.bounds doc) a (x.val ** t))
-             (a.try tyCtx)
-             (t.try (Sugar ctx) (tyCtx :< x.val) tmCtx)
-          |]
-        NoSugar =>
-          [| (\a, t => LetTy (AddDoc x.bounds doc) a (x.val ** t))
-             (a.try tyCtx)
-             (t.try NoSugar (tyCtx :< x.val) tmCtx)
-          |])
+  LetSeq : List (Stage TermState)
+  LetSeq =
+    [ MkStage (\s => (WithBounds String, WithDoc (Term' s)))
+        (Just $ \s, v => mapSnd (mapSnd (:< (fst v).val)) s)
+    , MkStage Term' Nothing
+    ]
 
-  mkArrow : (meta : Bounds) -> List Type'Fun -> Type'Fun -> Type'Fun
-  mkArrow meta [] cod = cod
-  mkArrow meta (arg :: args) cod =
-    let
-      arrowTm :
-        Term mode Bounds tyCtx tmCtx ->
-        Term mode Bounds tyCtx tmCtx ->
-        Term mode Bounds tyCtx tmCtx
-      arrowTm =
-        \t, u => Roll meta $ Inj meta "TArrow" $ Tup meta [<"Dom" :- t, "Cod" :- u]
-    in
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      case mode of
-        Quote ctx1 ctx2 =>
-          [| arrowTm
-             (arg.try (Quote ctx1 ctx2) tyCtx tmCtx)
-             ((mkArrow meta args cod).try (Quote ctx1 ctx2) tyCtx tmCtx)
-          |]
-        Sugar ctx =>
-          [| TArrow
-             (arg.try (Sugar ctx) tyCtx tmCtx)
-             ((mkArrow meta args cod).try (Sugar ctx) tyCtx tmCtx)
-          |]
-        NoSugar =>
-          [| TArrow
-             (arg.try NoSugar tyCtx tmCtx)
-             ((mkArrow meta args cod).try NoSugar tyCtx tmCtx)
-          |])
+  LetTySeq : List (Stage TermState)
+  LetTySeq =
+    [ MkStage (\s => (WithBounds String, WithDoc (Ty $ fst $ snd s)))
+        (Just $ \s, v => mapSnd (mapFst (:< (fst v).val)) s)
+    , MkStage Term' Nothing
+    ]
+
+  GetArgs : (state : TermState) -> Sequence state AnnotSeq -> TermState
+  GetArgs state [args, _, _, _, _] = mapSnd (mapSnd (<>< map fst args)) state
+
+  MkArrow : (meta : Bounds) -> (state : TermState) -> Type' state -> Type' state -> Type' state
+  MkArrow meta (Quote ctx1 ctx2, _, _) = \dom, cod =>
+    Roll meta $ Inj meta "TArrow" $ Tup meta [<"Dom" :- dom, "Cod" :- cod]
+  MkArrow meta (Sugar qtCtx, _, _) = TArrow
+  MkArrow meta (NoSugar, _, _) = TArrow
 
   mkAnnot :
-    HList [List (HList [String, (), Type'Fun]), WithBounds (), Type'Fun, (), List String, TermFun] ->
-    WithDoc TermFun
-  mkAnnot [[], m, cod, _, doc, t] =
+    (state : TermState) ->
+    Sequence state [MkStage (flip Sequence AnnotSeq) (Just GetArgs), MkStage Term' Nothing] ->
+    WithDoc (Term' state)
+  mkAnnot (_, _, _) [[[], colon, ret, _, docs], body] =
+    AddDoc (Annot colon.bounds body ret) docs
+  mkAnnot (mode, tyCtx, tmCtx) [[(arg :: args), colon, ret, _, docs], body] =
     AddDoc
-      (MkParseFun (\mode, tyCtx, tmCtx =>
-        [| Annot (pure m.bounds) (t.try mode tyCtx tmCtx) (cod.try mode tyCtx tmCtx) |]))
-      doc
-  mkAnnot [args, m, cod, _, doc, t] =
-    let bound = map (\[x, _, a] => x) args in
-    let tys = map (\[x, _, a] => a) args in
-    AddDoc
-      (MkParseFun (\mode, tyCtx, tmCtx =>
-        [| (\t, a => Annot m.bounds (Abs m.bounds (bound ** t)) a)
-           (t.try mode tyCtx (tmCtx <>< bound))
-           ((mkArrow m.bounds tys cod).try mode tyCtx tmCtx)
-        |]))
-      doc
+      (Annot colon.bounds
+        (Abs colon.bounds (fst arg :: map fst args ** body))
+        (foldr (MkArrow colon.bounds (mode, tyCtx, tmCtx)) ret (snd arg ::: map snd args)))
+      docs
 
-  mkUnannot : HList [(), List String, TermFun] -> WithDoc TermFun
-  mkUnannot [_, doc, e] = AddDoc e doc
+  mkLet : (state : TermState) -> Sequence state LetSeq -> Term' state
+  mkLet (_, _, _) [(x, body), rest] = Let (AddDoc x.bounds body.doc) body.value (x.val ** rest)
 
-AbsTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
+  mkLetTy :
+    (state : TermState) ->
+    Sequence state LetTySeq ->
+    Either (WithBounds InkyError) (Term' state)
+  mkLetTy (Quote ctx1 ctx2, _, _) [(x, ty), rest] = Left (NoQuotedTypes <$ x)
+  mkLetTy (Sugar qtCtx, _, _) [(x, ty), rest] =
+    pure $ LetTy (AddDoc x.bounds ty.doc) ty.value (x.val ** rest)
+  mkLetTy (NoSugar, _, _) [(x, ty), rest] =
+    pure $ LetTy (AddDoc x.bounds ty.doc) ty.value (x.val ** rest)
+
+AbsTerm : TermParser [<"openTerm"] [<]
 AbsTerm =
-  mkAbs <$> Seq
-    [ WithBounds (match Backslash)
-    , sepBy1 (match Comma) (match TermIdent)
-    , (match DoubleArrow <||> match WaveArrow)
-    , Var (%%% "openTerm")
-    ]
-  where
-  mkAbs : HList [WithBounds (), List1 String, Either () (), TermFun] -> TermFun
-  mkAbs [m, args, Left _, body] =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      [| (\t => Abs m.bounds (forget args ** t))
-         (body.try mode tyCtx (tmCtx <>< forget args))
-      |])
-  mkAbs [m, args, Right _, body] =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      case mode of
-        Quote ctx1 ctx2 => Errs (singleton $ NoQAbsMsg <$ m)
-        Sugar ctx =>
-          [| (\t => QAbs m.bounds (forget args ** t))
-             (body.try (Sugar (ctx <>< forget args)) tyCtx tmCtx)
-          |]
-        NoSugar => Errs (singleton $ NoSugarMsg <$ m))
-
-CaseTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
-CaseTerm =
-  (\[f, x] => f x) <$>
+  Map (mkAbs _) $
   Seq
-    [ OneOf
-      [ mkCase <$> Seq
-        [ WithBounds (match Case)
-        , Var (%%% "openTerm")
-        , match Of
-        ]
-      , mkFoldCase <$> Seq
-        [ WithBounds (match FoldCase)
-        , Var (%%% "openTerm")
-        , match By
-        ]
-      ]
-    , enclose (match BraceOpen) (match BraceClose) (
-        sepBy (match Semicolon) $
+    (Update
+      (WithBounds (match Backslash *> sepBy1 (match Comma) (match TermIdent)) <**>
+        (match DoubleArrow <||> match WaveArrow))
+      (Just UpdateCtx)
+      [Var (%%% "openTerm")])
+  where
+  UpdateCtx : (state : TermState) -> (WithBounds (List1 String), Either () ()) -> TermState
+  UpdateCtx state (args, Left abs) = mapSnd (mapSnd (<>< forget args.val)) state
+  UpdateCtx state (args, Right quot) = case fst state of
+    Sugar qtCtx => (Sugar (qtCtx <>< forget args.val), snd state)
+    _ => state
+
+  mkAbs :
+    (state : TermState) ->
+    Sequence state
+      [ MkStage (const $ (WithBounds (List1 String), Either () ())) (Just UpdateCtx)
+      , MkStage Term' Nothing
+      ] ->
+    Either (WithBounds InkyError) (Term' state)
+  mkAbs (mode, tyCtx, tmCtx) [(args, Left abs), body] = pure (Abs args.bounds (forget args.val ** body))
+  mkAbs (mode, tyCtx, tmCtx) [(args, Right quot), body] =
+    case mode of
+      Sugar qtCtx => pure (QAbs args.bounds (forget args.val ** body))
+      _ => Left (NeedsSugar mode <$ args)
+
+CaseTerm : TermParser [<"openTerm"] [<]
+CaseTerm =
+  Map (uncurry $ mkCase _) $
+      WithBounds (
+         (match Case *> Var (%%% "openTerm") <* match Of) <||>
+         (match FoldCase *> Var (%%% "openTerm") <* match By))
+  <**> Map mkRow
+    (enclose (match BraceOpen) (match BraceClose)
+      (sepBy (match Semicolon) $
         WithBounds $
-        Seq
-          [ match TypeIdent
-          , match TermIdent
-          , match DoubleArrow
-          , Var (%%% "openTerm")
-          ])
-    ]
+        (\[(label, x), body] => label :- (x ** body)) <$>
+        Seq (Update
+          (match TypeIdent <**> match TermIdent <* match DoubleArrow)
+          (Just $ \state, x => mapSnd (mapSnd (:< snd x)) state)
+          [Var (%%% "openTerm")])))
   where
-  Cases : Type
-  Cases = List (WithBounds $ HList [String, String, (), TermFun])
+  mkCase :
+    (state : TermState) ->
+    WithBounds (Either (Term' state) (Term' state)) ->
+    Row (x ** Term' (mapSnd (mapSnd (:< x)) state)) ->
+    Either (WithBounds InkyError) (Term' state)
+  mkCase (mode, _, _) x branches = case x.val of
+    Left target => pure $ Case x.bounds target branches
+    Right target => case mode of
+      Sugar _ => pure $ FoldCase x.bounds target branches
+      _ => Left (NeedsSugar mode <$ x)
 
-  mkBranch :
-    HList [String, String, (), TermFun] ->
-    Assoc
-      (ParseFun [<Mode, SnocList String, SnocList String] $
-       \mode, tyCtx, tmCtx => (x ** Term mode Bounds tyCtx (tmCtx :< x)))
-  mkBranch [tag, bound, _, branch] =
-    tag :-
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      [| (\t => MkDPair bound t) (branch.try mode tyCtx (tmCtx :< bound)) |])
-
-  mkCase : HList [WithBounds (), TermFun, _] -> Cases -> TermFun
-  mkCase [m, target, _] branches =
-    let branches = map (map mkBranch) branches in
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      [| Case (pure m.bounds)
-           (target.try mode tyCtx tmCtx)
-           ((parseRow3 branches).try mode tyCtx tmCtx)
-      |])
-
-  mkFoldCase : HList [WithBounds (), TermFun, _] -> Cases -> TermFun
-  mkFoldCase [m, target, _] branches =
-    let branches = map (map mkBranch) branches in
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      [| (\t, ts => Fold m.bounds t ("__tmp" ** Case m.bounds (Var m.bounds $ %% "__tmp") ts))
-         (target.try mode tyCtx tmCtx)
-         ((parseRow3 branches).try mode tyCtx (tmCtx :< "__tmp"))
-      |])
-
-FoldTerm : InkyParser False [<"openTerm" :- TermFun] [<] TermFun
+FoldTerm : TermParser [<"openTerm"] [<]
 FoldTerm =
-  mkFold <$> Seq
-    [ WithBounds (match Fold)
-    , Var (%%% "openTerm")
-    , match By
-    , enclose (match ParenOpen) (match ParenClose) $
-      Seq
-        [ match Backslash
-        , match TermIdent
-        , match DoubleArrow
-        , Var (%%% "openTerm")
-        ]
-    ]
+  mkFold _ <$>
+    ( WithBounds (match Fold *> Var (%%% "openTerm") <* match By)
+    <**>
+      (\[x, u] => (x ** u)) <$>
+      enclose (match ParenOpen) (match ParenClose)
+      (Seq $ Update
+        (match Backslash *> match TermIdent <* match DoubleArrow)
+        (Just $ \state, x => mapSnd (mapSnd (:< x)) state)
+        [Var (%%% "openTerm")]))
   where
-  mkFold : HList [WithBounds (), TermFun, (), HList [(), String, (), TermFun]] -> TermFun
-  mkFold [m, target, _, [_, arg, _, body]] =
-    MkParseFun (\mode, tyCtx, tmCtx =>
-      [| (\e, t => Fold m.bounds e (arg ** t))
-         (target.try mode tyCtx tmCtx)
-         (body.try mode tyCtx (tmCtx :< arg))
-      |])
+  mkFold :
+    (state : TermState) ->
+    (WithBounds (Term' state), (x ** Term' (mapSnd (mapSnd (:< x)) state))) ->
+    Term' state
+  mkFold (_, _, _) (t, rest) = Fold t.bounds t.val rest
 
 export
-OpenTerm : InkyParser False [<] [<] TermFun
+OpenTerm : TermParser [<] [<]
 OpenTerm =
   Fix "openTerm" $ OneOf
     [ LetTerm

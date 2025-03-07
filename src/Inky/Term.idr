@@ -95,6 +95,10 @@ data Term where
   Str :
     (meta : m) -> String ->
     Term (Sugar qtCtx) m tyCtx tmCtx
+  FoldCase :
+    (meta : m) -> Term (Sugar qtCtx) m tyCtx tmCtx ->
+    Row (x ** Term (Sugar qtCtx) m tyCtx (tmCtx :< x)) ->
+    Term (Sugar qtCtx) m tyCtx tmCtx
 
 %name Term e, f, t, u
 
@@ -122,6 +126,7 @@ export
 (List meta _).meta = meta
 (Cons meta _ _).meta = meta
 (Str meta _).meta = meta
+(FoldCase meta _ _).meta = meta
 
 --------------------------------------------------------------------------------
 -- Well Formed -----------------------------------------------------------------

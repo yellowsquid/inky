@@ -22,6 +22,7 @@ modules
   , Inky.Term.Pretty
   , Inky.Term.Pretty.Error
   , Inky.Term.Recompute
+  , Inky.Term.Rename
   , Inky.Type
   , Inky.Type.Pretty
   , Inky.Type.Substitution

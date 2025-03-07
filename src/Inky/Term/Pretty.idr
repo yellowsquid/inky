@@ -188,14 +188,6 @@ prettyTerm (Roll _ t) d =
   parenthesise (d < Prefix) $ align $ pretty "~" <+> prettyTerm t Prefix
 prettyTerm (Unroll _ e) d =
   parenthesise (d < Prefix) $ align $ pretty "!" <+> prettyTerm e Prefix
-prettyTerm (Fold _ e ("__tmp" ** Case _ (Var _ ((%%) "__tmp" {pos = Here})) (MkRow ts _))) d =
-  let parts = prettyCases ts <>> [] in
-  -- XXX: should check for usage of "__tmp" in ts
-  group $ align $ hang 2 $ parenthesise (d < Open) $
-    (group $ "foldcase" <++> prettyTerm e Open <++> "by") <+> line <+>
-    (braces $ flatAlt
-      (neutral <++> concatWith (surround $ line' <+> ";" <++> neutral) parts <+> line)
-      (concatWith (surround $ ";" <++> neutral) parts))
 prettyTerm (Fold _ e (x ** t)) d =
   group $ align $ hang 2 $ parenthesise (d < Open) $
     (group $ hang (-2) $ "fold" <++> prettyTerm e Open <++> "by") <+> line <+>
@@ -231,3 +223,10 @@ prettyTerm (Cons _ t u) d =
   group $ align $ hang 2 $ parenthesise (d < App) $
     concatWith (surround line) [pretty "cons", prettyTerm t Suffix, prettyTerm u Suffix]
 prettyTerm (Str _ str) d = enclose "\"" "\"" $ pretty str
+prettyTerm (FoldCase _ e (MkRow ts _)) d =
+  let parts = prettyCases ts <>> [] in
+  group $ align $ hang 2 $ parenthesise (d < Open) $
+    (group $ "foldcase" <++> prettyTerm e Open <++> "by") <+> line <+>
+    (braces $ flatAlt
+      (neutral <++> concatWith (surround $ line' <+> ";" <++> neutral) parts <+> line)
+      (concatWith (surround $ ";" <++> neutral) parts))

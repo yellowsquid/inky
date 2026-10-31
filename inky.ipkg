@@ -8,21 +8,3 @@ depends = contrib, flap, getopts
 
 executable = artyst
 main = Inky
-
-modules
-  = Inky
-  , Inky.Data.Fun
-  , Inky.Data.Row
-  , Inky.Data.Thinned
-  , Inky.Term
-  , Inky.Term.Checks
-  , Inky.Term.Compile
-  , Inky.Term.Desugar
-  , Inky.Term.Parser
-  , Inky.Term.Pretty
-  , Inky.Term.Pretty.Error
-  , Inky.Term.Recompute
-  , Inky.Term.Rename
-  , Inky.Type
-  , Inky.Type.Pretty
-  , Inky.Type.Substitution

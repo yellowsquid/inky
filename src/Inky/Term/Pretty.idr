@@ -11,28 +11,22 @@ import Text.PrettyPrint.Prettyprinter
 
 export
 prettyTerm :
-  {mode : Mode} -> {tyCtx, tmCtx : SnocList String} ->
-  Term mode m tyCtx tmCtx -> InkyPrec -> Doc ann
+  {tyCtx, tmCtx : SnocList String} ->
+  Term m tyCtx tmCtx -> InkyPrec -> Doc ann
 prettyAllTerm :
-  {mode : Mode} -> {tyCtx, tmCtx : SnocList String} ->
-  List (Term mode m tyCtx tmCtx) -> InkyPrec -> List (Doc ann)
+  {tyCtx, tmCtx : SnocList String} ->
+  List (Term m tyCtx tmCtx) -> InkyPrec -> List (Doc ann)
 prettyTermCtx :
-  {mode : Mode} -> {tyCtx, tmCtx : SnocList String} ->
-  Context (Term mode m tyCtx tmCtx) -> SnocList (Doc ann)
+  {tyCtx, tmCtx : SnocList String} ->
+  Context (Term m tyCtx tmCtx) -> SnocList (Doc ann)
 prettyCases :
-  {mode : Mode} -> {tyCtx, tmCtx : SnocList String} ->
-  Context (x ** Term mode m tyCtx (tmCtx :< x)) -> SnocList (Doc ann)
+  {tyCtx, tmCtx : SnocList String} ->
+  Context (x ** Term m tyCtx (tmCtx :< x)) -> SnocList (Doc ann)
 prettyLet :
   (eqLine : Doc ann) ->
   (doc : List String) ->
   (bound, body : Doc ann) ->
   Doc ann
-prettyType' :
-  (mode : Mode) -> {tyCtx, tmCtx : SnocList String} ->
-  Ty' mode m tyCtx tmCtx -> InkyPrec -> Doc ann
-prettyBoundType' :
-  (mode : Mode) -> {tyCtx, tmCtx : SnocList String} ->
-  BoundTy' mode m tyCtx tmCtx -> InkyPrec -> Doc ann
 
 prettyAllTerm [] d = []
 prettyAllTerm (t :: ts) d = prettyTerm t d :: prettyAllTerm ts d
@@ -43,12 +37,6 @@ prettyTermCtx (ts :< (l :- Abs _ (bound ** t))) =
  (align $ group $
    pretty l <+> ":" <++>
      "\\" <+> concatWith (surround $ "," <++> neutral) (map pretty bound) <++> "=>" <+> line <+>
-   prettyTerm t Open)
-prettyTermCtx (ts :< (l :- QAbs _ (bound ** t))) =
- prettyTermCtx ts :<
- (align $ group $
-   pretty l <+> ":" <++>
-     "\\" <+> concatWith (surround $ "," <++> neutral) (map pretty bound) <++> "~>" <+> line <+>
    prettyTerm t Open)
 prettyTermCtx (ts :< (l :- t)) =
   prettyTermCtx ts :<
@@ -76,22 +64,12 @@ prettyLet eqLine doc bound body =
     "in") <+> line <+>
     group body
 
-prettyType' (Quote tyCtx tmCtx) a d = parenthesise (d < Prefix) $ align $ "," <+> prettyTerm a Prefix
-prettyType' (Sugar qtCtx) a d = prettyType a d
-prettyType' NoSugar a d = prettyType a d
-
-prettyBoundType' (Quote tyCtx tmCtx) a d = parenthesise (d < Prefix) $ align $ "," <+> prettyTerm a Prefix
-prettyBoundType' (Sugar qtCtx) (x ** a) d =
-  parens $ align $ hang 2 $ group $ "\\" <+> pretty x <++> "=>" <+> line <+> prettyType a Open
-prettyBoundType' NoSugar (x ** a) d =
-  parens $ align $ hang 2 $ group $ "\\" <+> pretty x <++> "=>" <+> line <+> prettyType a Open
-
 prettyTerm (Annot _ t a) d =
   align $ group $ parenthesise (d < Annot) $
     prettyTerm t App <+> line <+>
-    ":" <++> prettyType' mode a Open
+    ":" <++> prettyType a Open
 prettyTerm (Var _ i) d = pretty (unVal $ nameOf i)
-prettyTerm {mode = Sugar _} (Let meta (Annot _ (Abs _ (bound ** e)) a) (x ** t)) d =
+prettyTerm (Let meta (Annot _ (Abs _ (bound ** e)) a) (x ** t)) d =
   let (binds, cod, rest) = groupBinds bound a in
   let binds = map (\x => parens (pretty x.name <++> ":" <++> prettyType x.value Open)) binds in
   align $ group $ parenthesise (d < Open) $
@@ -120,7 +98,7 @@ prettyTerm {mode = Sugar _} (Let meta (Annot _ (Abs _ (bound ** e)) a) (x ** t))
 prettyTerm (Let meta (Annot _ e a) (x ** t)) d =
   align $ group $ parenthesise (d < Open) $
   prettyLet
-    (pretty x <+> line <+> ":" <++> prettyType' mode a Open <++> "=")
+    (pretty x <+> line <+> ":" <++> prettyType a Open <++> "=")
     meta.doc
     (prettyTerm e Open)
     (prettyTerm t Open)
@@ -146,9 +124,9 @@ prettyTerm (App _ (Map _ a b c) ts) d =
   align $ hang 2 $ group $ parenthesise (d < App) $
     concatWith (surround line)
       (  pretty "map"
-      :: prettyBoundType' mode a Suffix
-      :: prettyType' mode b Suffix
-      :: prettyType' mode c Suffix
+      :: prettyBoundType a Suffix
+      :: prettyType b Suffix
+      :: prettyType c Suffix
       :: prettyAllTerm ts Suffix)
 prettyTerm (App _ f ts) d =
   align $ hang 2 $ group $ parenthesise (d < App) $
@@ -185,32 +163,10 @@ prettyTerm (Map _ a b c) d =
   align $ hang 2 $ group $ parenthesise (d < App) $
     concatWith (surround line)
       [ pretty "map"
-      , prettyBoundType' mode a Suffix
-      , prettyType' mode  b Suffix
-      , prettyType' mode  c Suffix
+      , prettyBoundType a Suffix
+      , prettyType b Suffix
+      , prettyType c Suffix
       ]
-prettyTerm (QuasiQuote _ t) d =
-  parenthesise (d < Prefix) $ align $ pretty "`" <+> prettyTerm t Prefix
-prettyTerm (Unquote _ t) d =
-  parenthesise (d < Prefix) $ align $ pretty "," <+> prettyTerm t Prefix
-prettyTerm (QAbs _ (bound ** t)) d =
-  hang 2 $ group $ parenthesise (d < Open) $
-    "\\" <+> concatWith (surround $ "," <++> neutral) (map pretty bound) <++> "~>" <+> line <+>
-    prettyTerm t Open
-prettyTerm (Lit _ k) d = pretty k
-prettyTerm (Suc _ t) d =
-  align $ hang 2 $ group $ parenthesise (d < App) $
-    concatWith (surround line) [pretty "suc", prettyTerm t Suffix]
-prettyTerm (List _ ts) d =
-  let parts = prettyAllTerm ts Open in
-  align $ group $ enclose "[" "]" $
-    flatAlt
-      (neutral <++> concatWith (surround $ line' <+> ";" <++> neutral) parts <+> line)
-      (concatWith (surround $ ";" <++> neutral) parts)
-prettyTerm (Cons _ t u) d =
-  align $ hang 2 $ group $ parenthesise (d < App) $
-    concatWith (surround line) [pretty "cons", prettyTerm t Suffix, prettyTerm u Suffix]
-prettyTerm (Str _ str) d = enclose "\"" "\"" $ pretty str
 prettyTerm (FoldCase _ e (MkRow ts _)) d =
   let parts = prettyCases ts <>> [] in
   align $ hang 2 $ group $ parenthesise (d < Open) $

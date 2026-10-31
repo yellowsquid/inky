@@ -16,94 +16,33 @@ import Flap.Decidable.Maybe
 --------------------------------------------------------------------------------
 
 public export
-data Mode : Type where
-  Quote : (tyCtx, tmCtx : SnocList String) -> Mode
-  Sugar : (qtCtx : SnocList String) -> Mode
-  NoSugar : Mode
-
-namespace Mode
-  public export
-  NotQuote : Mode -> Type
-  NotQuote (Quote _ _) = Void
-  NotQuote (Sugar _) = So True
-  NotQuote NoSugar = So True
-
-  public export
-  HasSugar : Mode -> Type
-  HasSugar (Quote _ _) = So True
-  HasSugar (Sugar _) = So True
-  HasSugar NoSugar = Void
-
-public export
 record WithDoc (a : Type) where
   constructor AddDoc
   value : a
   doc : List String
 
 public export
-data Term : Mode -> (m : Type) -> (tyCtx, tmCtx : SnocList String) -> Type
-
-public export
-Ty' : Mode -> (m : Type) -> (tyCtx, tmCtx : SnocList String) -> Type
-Ty' (Quote tyCtx tmCtx) m _ qtCtx = Term (Sugar qtCtx) m tyCtx tmCtx
-Ty' (Sugar qtCtx) m tyCtx tmCtx = Ty tyCtx
-Ty' NoSugar m tyCtx tmCtx = Ty tyCtx
-
-public export
-BoundTy' : Mode -> (m : Type) -> (tyCtx, tmCtx : SnocList String) -> Type
-BoundTy' (Quote tyCtx tmCtx) m _ qtCtx = Term (Sugar qtCtx) m tyCtx tmCtx
-BoundTy' (Sugar qtCtx) m tyCtx tmCtx = (x ** Ty (tyCtx :< x))
-BoundTy' NoSugar m tyCtx tmCtx = (x ** Ty (tyCtx :< x))
-
-data Term where
-  Annot : (meta : m) -> Term mode m tyCtx tmCtx -> Ty' mode m tyCtx tmCtx -> Term mode m tyCtx tmCtx
-  Var : (meta : m) -> Var tmCtx -> Term mode m tyCtx tmCtx
-  Let : (meta : WithDoc m) -> Term mode m tyCtx tmCtx -> (x ** Term mode m tyCtx (tmCtx :< x)) -> Term mode m tyCtx tmCtx
-  LetTy :
-    {auto 0 notQuote : NotQuote mode} ->
-    (meta : WithDoc m) -> Ty tyCtx ->
-    (x ** Term mode m (tyCtx :< x) tmCtx) -> Term mode m tyCtx tmCtx
-  Abs : (meta : m) -> (bound ** Term mode m tyCtx (tmCtx <>< bound)) -> Term mode m tyCtx tmCtx
-  App : (meta : m) -> Term mode m tyCtx tmCtx -> List (Term mode m tyCtx tmCtx) -> Term mode m tyCtx tmCtx
-  Tup : (meta : m) -> Row (Term mode m tyCtx tmCtx) -> Term mode m tyCtx tmCtx
-  Prj : (meta : m) -> Term mode m tyCtx tmCtx -> (l : String) -> Term mode m tyCtx tmCtx
-  Inj : (meta : m) -> (l : String) -> Term mode m tyCtx tmCtx -> Term mode m tyCtx tmCtx
-  Case : (meta : m) -> Term mode m tyCtx tmCtx -> Row (x ** Term mode m tyCtx (tmCtx :< x)) -> Term mode m tyCtx tmCtx
-  Roll : (meta : m) -> Term mode m tyCtx tmCtx -> Term mode m tyCtx tmCtx
-  Unroll : (meta : m) -> Term mode m tyCtx tmCtx -> Term mode m tyCtx tmCtx
-  Fold : (meta : m) -> Term mode m tyCtx tmCtx -> (x ** Term mode m tyCtx (tmCtx :< x)) -> Term mode m tyCtx tmCtx
-  Map : (meta : m) -> BoundTy' mode m tyCtx tmCtx -> Ty' mode m tyCtx tmCtx -> Ty' mode m tyCtx tmCtx -> Term mode m tyCtx tmCtx
-  -- Quotation sugar
-  QuasiQuote : (meta : m) -> Term (Quote tyCtx tmCtx) m [<] qtCtx -> Term (Sugar qtCtx) m tyCtx tmCtx
-  Unquote : (meta : m) -> Term (Sugar qtCtx) m tyCtx tmCtx -> Term (Quote tyCtx tmCtx) m [<] qtCtx
-  QAbs : (meta : m) -> (bound ** Term (Sugar (qtCtx <>< bound)) m tyCtx tmCtx) -> Term (Sugar qtCtx) m tyCtx tmCtx
-  -- Other sugar
-  Lit :
-    (meta : m) -> Nat ->
-    Term (Sugar qtCtx) m tyCtx tmCtx
-  Suc :
-    (meta : m) -> Term (Sugar qtCtx) m tyCtx tmCtx ->
-    Term (Sugar qtCtx) m tyCtx tmCtx
-  List :
-    (meta : m) -> List (Term (Sugar qtCtx) m tyCtx tmCtx) ->
-    Term (Sugar qtCtx) m tyCtx tmCtx
-  Cons :
-    (meta : m) ->
-    Term (Sugar qtCtx) m tyCtx tmCtx ->
-    Term (Sugar qtCtx) m tyCtx tmCtx ->
-    Term (Sugar qtCtx) m tyCtx tmCtx
-  Str :
-    (meta : m) -> String ->
-    Term (Sugar qtCtx) m tyCtx tmCtx
-  FoldCase :
-    (meta : m) -> Term (Sugar qtCtx) m tyCtx tmCtx ->
-    Row (x ** Term (Sugar qtCtx) m tyCtx (tmCtx :< x)) ->
-    Term (Sugar qtCtx) m tyCtx tmCtx
+data Term : (m : Type) -> (tyCtx, tmCtx : SnocList String) -> Type where
+  Annot : (meta : m) -> Term m tyCtx tmCtx -> Ty tyCtx -> Term m tyCtx tmCtx
+  Var : (meta : m) -> Var tmCtx -> Term m tyCtx tmCtx
+  Let : (meta : WithDoc m) -> Term m tyCtx tmCtx -> (x ** Term m tyCtx (tmCtx :< x)) -> Term m tyCtx tmCtx
+  LetTy : (meta : WithDoc m) -> Ty tyCtx -> (x ** Term m (tyCtx :< x) tmCtx) -> Term m tyCtx tmCtx
+  Abs : (meta : m) -> (bound ** Term m tyCtx (tmCtx <>< bound)) -> Term m tyCtx tmCtx
+  App : (meta : m) -> Term m tyCtx tmCtx -> List (Term m tyCtx tmCtx) -> Term m tyCtx tmCtx
+  Tup : (meta : m) -> Row (Term m tyCtx tmCtx) -> Term m tyCtx tmCtx
+  Prj : (meta : m) -> Term m tyCtx tmCtx -> (l : String) -> Term m tyCtx tmCtx
+  Inj : (meta : m) -> (l : String) -> Term m tyCtx tmCtx -> Term m tyCtx tmCtx
+  Case : (meta : m) -> Term m tyCtx tmCtx -> Row (x ** Term m tyCtx (tmCtx :< x)) -> Term m tyCtx tmCtx
+  Roll : (meta : m) -> Term m tyCtx tmCtx -> Term m tyCtx tmCtx
+  Unroll : (meta : m) -> Term m tyCtx tmCtx -> Term m tyCtx tmCtx
+  Fold : (meta : m) -> Term m tyCtx tmCtx -> (x ** Term m tyCtx (tmCtx :< x)) -> Term m tyCtx tmCtx
+  Map : (meta : m) -> (x ** Ty (tyCtx :< x)) -> Ty tyCtx -> Ty tyCtx -> Term m tyCtx tmCtx
+  FoldCase : (meta : m) -> Term m tyCtx tmCtx -> Row (x ** Term m tyCtx (tmCtx :< x)) -> Term m tyCtx tmCtx
 
 %name Term e, f, t, u
 
 export
-(.meta) : Term mode m tyCtx tmCtx -> m
+(.meta) : Term m tyCtx tmCtx -> m
 (Annot meta _ _).meta = meta
 (Var meta _).meta = meta
 (Let meta _ _).meta = meta.value
@@ -118,14 +57,6 @@ export
 (Unroll meta _).meta = meta
 (Fold meta _ _).meta = meta
 (Map meta _ _ _).meta = meta
-(QuasiQuote meta _).meta = meta
-(Unquote meta _).meta = meta
-(QAbs meta _).meta = meta
-(Lit meta _).meta = meta
-(Suc meta _).meta = meta
-(List meta _).meta = meta
-(Cons meta _ _).meta = meta
-(Str meta _).meta = meta
 (FoldCase meta _ _).meta = meta
 
 --------------------------------------------------------------------------------
@@ -194,7 +125,7 @@ isFunction (x :: bound) a =
 
 namespace Modes
   public export
-  data SynthsOnly : Term NoSugar m tyCtx tmCtx -> Type where
+  data SynthsOnly : Term m tyCtx tmCtx -> Type where
     Annot : SynthsOnly (Annot meta t a)
     Var : SynthsOnly (Var meta i)
     App : SynthsOnly (App meta f ts)
@@ -203,12 +134,13 @@ namespace Modes
     Map : SynthsOnly (Map meta (x ** a) b c)
 
   public export
-  data ChecksOnly : Term NoSugar m tyCtx tmCtx -> Type where
+  data ChecksOnly : Term m tyCtx tmCtx -> Type where
     Abs : ChecksOnly (Abs meta (bounds ** t))
     Inj : ChecksOnly (Inj meta l t)
     Case : ChecksOnly (Case meta e ts)
     Roll : ChecksOnly (Roll meta t)
     Fold : ChecksOnly (Fold meta e (x ** t))
+    FoldCase : ChecksOnly (FoldCase meta e ts)
 
   %name SynthsOnly shape
   %name ChecksOnly shape
@@ -217,19 +149,19 @@ public export
 data Synths :
   All (Assoc0 $ Ty [<]) tyCtx ->
   All (Assoc0 $ Ty [<]) tmCtx ->
-  Term NoSugar m tyCtx tmCtx -> Ty [<] -> Type
+  Term m tyCtx tmCtx -> Ty [<] -> Type
 public export
 data Checks :
   All (Assoc0 $ Ty [<]) tyCtx ->
   All (Assoc0 $ Ty [<]) tmCtx ->
-  Ty [<] -> Term NoSugar m tyCtx tmCtx -> Type
+  Ty [<] -> Term m tyCtx tmCtx -> Type
 
 namespace Spine
   public export
   data CheckSpine :
     All (Assoc0 $ Ty [<]) tyCtx ->
     All (Assoc0 $ Ty [<]) tmCtx ->
-    Ty [<] -> List (Term NoSugar m tyCtx tmCtx) -> Ty [<] -> Type
+    Ty [<] -> List (Term m tyCtx tmCtx) -> Ty [<] -> Type
     where
     Nil : CheckSpine tyEnv tmEnv a [] a
     (::) :
@@ -244,7 +176,7 @@ namespace Synths
   data AllSynths :
     All (Assoc0 $ Ty [<]) tyCtx ->
     All (Assoc0 $ Ty [<]) tmCtx ->
-    Context (Term NoSugar m tyCtx tmCtx) -> Row (Ty [<]) -> Type
+    Context (Term m tyCtx tmCtx) -> Row (Ty [<]) -> Type
     where
     Lin : AllSynths tyEnv tmEnv [<] [<]
     (:<) :
@@ -260,7 +192,7 @@ namespace Checks
   data AllChecks :
     All (Assoc0 $ Ty [<]) tyCtx ->
     All (Assoc0 $ Ty [<]) tmCtx ->
-    Context (Ty [<]) -> Context (Term NoSugar m tyCtx tmCtx) -> Type
+    Context (Ty [<]) -> Context (Term m tyCtx tmCtx) -> Type
     where
     Base : AllChecks tyEnv tmEnv [<] [<]
     Step :
@@ -276,7 +208,7 @@ namespace Branches
   data AllBranches :
     All (Assoc0 $ Ty [<]) tyCtx ->
     All (Assoc0 $ Ty [<]) tmCtx ->
-    Context (Ty [<]) -> Ty [<] -> Context (x ** Term NoSugar m tyCtx (tmCtx :< x)) -> Type
+    Context (Ty [<]) -> Ty [<] -> Context (x ** Term m tyCtx (tmCtx :< x)) -> Type
     where
     Base : AllBranches tyEnv tmEnv [<] a [<]
     Step :
@@ -301,7 +233,7 @@ data Synths where
   LetTyS :
     WellFormed a ->
     Synths (tyEnv :< (x :- sub tyEnv a)) tmEnv e b ->
-    Synths tyEnv tmEnv (LetTy {notQuote} meta a (x ** e)) b
+    Synths tyEnv tmEnv (LetTy meta a (x ** e)) b
   AppS :
     Synths tyEnv tmEnv f a ->
     CheckSpine tyEnv tmEnv a ts b ->
@@ -341,7 +273,7 @@ data Checks where
   LetTyC :
     WellFormed a ->
     Checks (tyEnv :< (x :- sub tyEnv a)) tmEnv b t ->
-    Checks tyEnv tmEnv b (LetTy {notQuote} meta a (x ** t))
+    Checks tyEnv tmEnv b (LetTy meta a (x ** t))
   AbsC :
     IsFunction bound a dom cod ->
     Checks tyEnv (tmEnv <>< dom) cod t ->
@@ -380,6 +312,10 @@ data Checks where
     Synths tyEnv tmEnv (Map meta (x ** a) b c) d ->
     Alpha d e ->
     Checks tyEnv tmEnv e (Map meta (x ** a) b c)
+  FoldCaseC :
+    Synths tyEnv tmEnv e (TFix x (TSum as)) ->
+    AllBranches tyEnv tmEnv (subAll [<_ :- b] as.context) b ts.context ->
+    Checks tyEnv tmEnv b (FoldCase meta e ts)
 
 public export
 %inline
@@ -402,19 +338,19 @@ public export
 data NotSynths :
   All (Assoc0 $ Ty [<]) tyCtx ->
   All (Assoc0 $ Ty [<]) tmCtx ->
-  Term NoSugar m tyCtx tmCtx -> Type
+  Term m tyCtx tmCtx -> Type
 public export
 data NotChecks :
   All (Assoc0 $ Ty [<]) tyCtx ->
   All (Assoc0 $ Ty [<]) tmCtx ->
-  Ty [<] -> Term NoSugar m tyCtx tmCtx -> Type
+  Ty [<] -> Term m tyCtx tmCtx -> Type
 
 namespace Spine
   public export
   data NotCheckSpine :
     All (Assoc0 $ Ty [<]) tyCtx ->
     All (Assoc0 $ Ty [<]) tmCtx ->
-    Ty [<] -> List (Term NoSugar m tyCtx tmCtx) -> Type
+    Ty [<] -> List (Term m tyCtx tmCtx) -> Type
     where
     Step1 :
       ((b, c : Ty [<]) -> Not (a = TArrow b c)) ->
@@ -430,7 +366,7 @@ namespace Synths
   data AnyNotSynths :
     All (Assoc0 $ Ty [<]) tyCtx ->
     All (Assoc0 $ Ty [<]) tmCtx ->
-    (ts : Context (Term NoSugar m tyCtx tmCtx)) -> Type
+    (ts : Context (Term m tyCtx tmCtx)) -> Type
     where
     Step :
       These (NotSynths tyEnv tmEnv t) (AnyNotSynths tyEnv tmEnv ts) ->
@@ -443,7 +379,7 @@ namespace Checks
   data AnyNotChecks :
     All (Assoc0 $ Ty [<]) tyCtx ->
     All (Assoc0 $ Ty [<]) tmCtx ->
-    Context (Ty [<]) -> Context (Term NoSugar m tyCtx tmCtx) -> Type
+    Context (Ty [<]) -> Context (Term m tyCtx tmCtx) -> Type
     where
     Base1 : AnyNotChecks tyEnv tmEnv (as :< la) [<]
     Step1 :
@@ -461,7 +397,7 @@ namespace Branches
   data AnyNotBranches :
     All (Assoc0 $ Ty [<]) tyCtx ->
     All (Assoc0 $ Ty [<]) tmCtx ->
-    Context (Ty [<]) -> Ty [<] -> Context (x ** Term NoSugar m tyCtx (tmCtx :< x)) -> Type
+    Context (Ty [<]) -> Ty [<] -> Context (x ** Term m tyCtx (tmCtx :< x)) -> Type
     where
     Base1 : AnyNotBranches tyEnv tmEnv (as :< a) b [<]
     Step1 :
@@ -497,7 +433,7 @@ data NotSynths where
     NotSynths tyEnv tmEnv (Let meta e (x ** f))
   LetTyNS :
     These (IllFormed a) (NotSynths (tyEnv :< (x :- sub tyEnv a)) tmEnv e) ->
-    NotSynths tyEnv tmEnv (LetTy {notQuote} meta a (x ** e))
+    NotSynths tyEnv tmEnv (LetTy meta a (x ** e))
   AppNS1 :
     NotSynths tyEnv tmEnv f ->
     NotSynths tyEnv tmEnv (App meta f ts)
@@ -554,7 +490,7 @@ data NotChecks where
     NotChecks tyEnv tmEnv b (Let meta e (x ** t))
   LetTyNC :
     These (IllFormed a) (NotChecks (tyEnv :< (x :- sub tyEnv a)) tmEnv b t) ->
-    NotChecks tyEnv tmEnv b (LetTy {notQuote} meta a (x ** t))
+    NotChecks tyEnv tmEnv b (LetTy meta a (x ** t))
   AbsNC1 :
     NotFunction bound a ->
     NotChecks tyEnv tmEnv a (Abs meta (bound ** t))
@@ -606,6 +542,17 @@ data NotChecks where
     Synths tyEnv tmEnv e (TFix x a) ->
     NotChecks tyEnv (tmEnv :< (y :- sub [<x :- b] a)) b t ->
     NotChecks tyEnv tmEnv b (Fold meta e (y ** t))
+  FoldCaseNC1 :
+    NotSynths tyEnv tmEnv e ->
+    NotChecks tyEnv tmEnv a (FoldCase meta e ts)
+  FoldCaseNC2 :
+    Synths tyEnv tmEnv e b ->
+    ((x : String) -> (as : Row (Ty [<x])) -> Not (b = TFix x (TSum as))) ->
+    NotChecks tyEnv tmEnv a (FoldCase meta e ts)
+  FoldCaseNC3 :
+    Synths tyEnv tmEnv e (TFix x (TSum as)) ->
+    AnyNotBranches tyEnv tmEnv (subAll [<_ :- b] as.context) b ts.context ->
+    NotChecks tyEnv tmEnv b (FoldCase meta e ts)
 
 %name NotSynths contra
 %name NotChecks contra

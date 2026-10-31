@@ -863,61 +863,37 @@ extractHomo f x = renameHomo f x.thins x.value
 public export
 sub' : All (Assoc0 $ Thinned Ty ctx2) ctx1 -> Ty ctx1 -> Ty ctx2
 public export
-subAll : All (Assoc0 $ Thinned Ty ctx2) ctx1 -> Context (Ty ctx1) -> Context (Ty ctx2)
+sub'All : All (Assoc0 $ Thinned Ty ctx2) ctx1 -> Context (Ty ctx1) -> Context (Ty ctx2)
 public export
-subAllNames :
+sub'AllNames :
   (f : All (Assoc0 $ Thinned Ty ctx2) ctx1) ->
   (env : Context (Ty ctx1)) ->
-  (subAll f env).names = env.names
+  (sub'All f env).names = env.names
 
 sub' env (TVar i) = (indexAll i.pos env).value.extract
 sub' env (TArrow a b) = TArrow (sub' env a) (sub' env b)
-sub' env (TProd (MkRow as fresh)) = TProd (MkRow (subAll env as) (rewrite subAllNames env as in fresh))
-sub' env (TSum (MkRow as fresh)) = TSum (MkRow (subAll env as) (rewrite subAllNames env as in fresh))
+sub' env (TProd (MkRow as fresh)) = TProd (MkRow (sub'All env as) (rewrite sub'AllNames env as in fresh))
+sub' env (TSum (MkRow as fresh)) = TSum (MkRow (sub'All env as) (rewrite sub'AllNames env as in fresh))
 sub' env (TFix x a) =
   TFix x (sub' (mapProperty (map $ rename $ Drop Id) env :< (x :- (TVar (%% x) `Over` Id))) a)
 
-subAll env [<] = [<]
-subAll env (as :< (n :- a)) = subAll env as :< (n :- sub' env a)
+sub'All env [<] = [<]
+sub'All env (as :< (n :- a)) = sub'All env as :< (n :- sub' env a)
 
-subAllNames env [<] = Refl
-subAllNames env (as :< (n :- a)) = cong (:< n) (subAllNames env as)
+sub'AllNames env [<] = Refl
+sub'AllNames env (as :< (n :- a)) = cong (:< n) (sub'AllNames env as)
 
 public export
 sub : All (Assoc0 $ Ty ctx2) ctx1 -> Ty ctx1 -> Ty ctx2
 sub = sub' . mapProperty (map $ (`Over` Id))
 
--- Special Types ---------------------------------------------------------------
+public export
+subAll : All (Assoc0 $ Ty ctx2) ctx1 -> Context (Ty ctx1) -> Context (Ty ctx2)
+subAll = sub'All . mapProperty (map $ (`Over` Id))
 
 public export
-TNat : Ty ctx
-TNat = TFix "Nat" (TSum [<"Z" :- TProd [<], "S" :- TVar (%% "Nat")])
-
-public export
-TList : Ty ctx -> Ty ctx
-TList a =
-  TFix "List" (TSum
-    [<"N" :- TProd [<]
-    , "C" :- TProd [<"H" :- rename (Drop Id) a, "T" :- TVar (%% "List")]])
-
--- Testing if we have a list
-
--- TODO: prove correct
-isList : (a : Ty ctx) -> Maybe (Ty ctx)
-isList (TFix x (TSum (MkRow
-  [<"N" :- TProd (MkRow [<] _)
-  , "C" :- TProd (MkRow [<"H" :- a, "T" :- TVar ((%%) x {pos = Here})] _)] _))) =
-  does (strengthen (%% x) a)
-isList (TFix x (TSum (MkRow
-  [<"N" :- TProd (MkRow [<] _)
-  , "C" :- TProd (MkRow [<"T" :- TVar ((%%) x {pos = Here}), "H" :- a] _)] _))) =
-  does (strengthen (%% x) a)
-isList (TFix x (TSum (MkRow
-  [<"C" :- TProd (MkRow [<"H" :- a, "T" :- TVar ((%%) x {pos = Here})] _)
-  , "N" :- TProd (MkRow [<] _)] _))) =
-  does (strengthen (%% x) a)
-isList (TFix x (TSum (MkRow
-  [<"C" :- TProd (MkRow [<"T" :- TVar ((%%) x {pos = Here}), "H" :- a] _)
-  , "N" :- TProd (MkRow [<] _)] _))) =
-  does (strengthen (%% x) a)
-isList _ = Nothing
+subAllNames :
+  (f : All (Assoc0 $ Ty ctx2) ctx1) ->
+  (env : Context (Ty ctx1)) ->
+  (subAll f env).names = env.names
+subAllNames f env = sub'AllNames (mapProperty (map $ (`Over` Id)) f) env

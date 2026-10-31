@@ -13,8 +13,6 @@ import Flap.Parser
 
 import Inky.Term
 import Inky.Term.Checks
-import Inky.Term.Compile
-import Inky.Term.Desugar
 import Inky.Term.Parser
 import Inky.Term.Pretty
 import Inky.Term.Pretty.Error
@@ -41,7 +39,7 @@ record Erased (a : Type) where
 
 record SynthFailed where
   constructor UhOh
-  term : Term NoSugar Bounds [<] [<]
+  term : Term Bounds [<] [<]
   err : NotSynths {m = Bounds} [<] [<] term
 
 Err : Type
@@ -126,11 +124,11 @@ parseTerm :
     , FileIO
     ] es =>
   (termPath, tyPath : Maybe FilePath) ->
-  App es (Term (Sugar [<]) Bounds [<] [<])
+  App es (Term Bounds [<] [<])
 parseTerm termPath tyPath = do
   txt <- readFileOrStdin termPath
   toks <- lexInkyString txt
-  t <- doParse OpenTerm toks (Sugar [<], [<], [<])
+  t <- doParse OpenTerm toks ([<], [<])
   -- Annotate with type
   let Just _ = tyPath
     | Nothing => pure t
@@ -143,7 +141,7 @@ checkType a =
     throw "type ill-formed"
 
 synthTerm :
-  (t : Term NoSugar Bounds [<] [<]) ->
+  (t : Term Bounds [<] [<]) ->
   HasErr SynthFailed es =>
   App es (Subset (Ty [<]) (Synths [<] [<] t))
 synthTerm t = do
@@ -164,24 +162,12 @@ openFile (Just path) cont = withFile path WriteTruncate throw cont
 
 printTerm :
   FileIO es => (opts : LayoutOptions) ->
-  {mode : Term.Mode} -> Term mode m [<] [<] ->
+  Term m [<] [<] ->
   (output : Maybe String) ->
   App es ()
 printTerm opts a out =
   openFile out $ \file =>
     writeFile file $ layoutSmart opts $ prettyTerm a Open
-
-compileTerm :
-  FileIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
-  {t : Term NoSugar m [<] [<]} ->
-  (0 prf : Synths [<] [<] t a) ->
-  (output : Maybe String) ->
-  App es ()
-compileTerm prf out =
-  openFile out $ \file =>
-    writeFile file $ layoutSmart opts $
-      pretty "(use-modules (ice-9 match))" <+> line <+>
-      parens (hang 1 $ pretty "define main" <+> line <+> group (compileSynths [<] [<] prf))
 
 -- Arguments -------------------------------------------------------------------
 
@@ -203,14 +189,12 @@ record FormatOptions where
   constructor MkFormatOptions
   global: GlobalOptions
   width: Maybe Nat
-  desugar: Bool
   output: Maybe FilePath
 
 defaultFormatOptions : FormatOptions
 defaultFormatOptions = MkFormatOptions
   { global = defaultGlobalOptions
   , width = Nothing
-  , desugar = False
   , output = Nothing
   }
 
@@ -223,19 +207,6 @@ defaultCheckOptions : CheckOptions
 defaultCheckOptions = MkCheckOptions
   { global = defaultGlobalOptions
   , type = Nothing
-  }
-
-record CompileOptions where
-  constructor MkCompileOptions
-  global: GlobalOptions
-  type: Maybe FilePath
-  output: Maybe FilePath
-
-defaultCompileOptions : CompileOptions
-defaultCompileOptions = MkCompileOptions
-  { global = defaultGlobalOptions
-  , type = Nothing
-  , output = Nothing
   }
 
 globalOptions : List (OptDescr (GlobalOptions -> GlobalOptions))
@@ -264,8 +235,6 @@ formatOptions =
           Left "width must be an integer")
       "WIDTH")
     "set maximum width of lines to WIDTH"
-  , MkOpt [] ["desugar"] (NoArg $ the (FormatOptions -> FormatOptions) { desugar := True})
-    "desugar the term before formatting"
   , MkOpt ['o'] ["output"]
     (ReqArg (\path => the (FormatOptions -> FormatOptions) { output := Just path }) "FILE")
     "output to FILE"
@@ -284,61 +253,39 @@ checkOptions =
     "type check according to type in FILE"
   ]
 
-compileOptions : List (OptDescr (CompileOptions -> CompileOptions))
-compileOptions =
-  [ MkOpt ['h'] ["help"]
-    (NoArg $ the (CompileOptions -> CompileOptions) { global $= setHelp })
-    "display this help and exit"
-  , MkOpt ['v'] ["version"]
-    (NoArg $ the (CompileOptions -> CompileOptions) { global $= setVersion })
-    "display version information and exit"
-  , MkOpt [] ["type"]
-    (ReqArg (\path => the (CompileOptions -> CompileOptions) { type := Just path }) "FILE")
-    "type check according to type in FILE"
-  , MkOpt ['o'] ["output"]
-    (ReqArg (\path => the (CompileOptions -> CompileOptions) { output := Just path }) "FILE")
-    "output to FILE"
-  ]
-
 -- Driver ----------------------------------------------------------------------
 
-data ProgramMode = Global | Format | Check | Compile
+data ProgramMode = Global | Format | Check
 
 Show ProgramMode where
   show Global = ""
   show Format = "format"
   show Check = "check"
-  show Compile = "compile"
 
 ModeOptionTy : ProgramMode -> Type
 ModeOptionTy Global = GlobalOptions
 ModeOptionTy Format = FormatOptions
 ModeOptionTy Check = CheckOptions
-ModeOptionTy Compile = CompileOptions
 
 synopsis : ProgramMode -> String
 synopsis Global = "Manipulate and type check Artyst terms."
 synopsis Format = "Format Artyst terms."
 synopsis Check = "Type check Artyst terms."
-synopsis Compile = "Compile Artyst terms to Scheme."
 
 getGlobal : (mode : ProgramMode) -> ModeOptionTy mode -> GlobalOptions
 getGlobal Global = id
 getGlobal Format = (.global)
 getGlobal Check = (.global)
-getGlobal Compile = (.global)
 
 defaultOptions : (mode : ProgramMode) -> ModeOptionTy mode
 defaultOptions Global = defaultGlobalOptions
 defaultOptions Format = defaultFormatOptions
 defaultOptions Check = defaultCheckOptions
-defaultOptions Compile = defaultCompileOptions
 
 modeOptions : (mode : ProgramMode) -> List (OptDescr (ModeOptionTy mode -> ModeOptionTy mode))
 modeOptions Global = globalOptions
 modeOptions Format = formatOptions
 modeOptions Check = checkOptions
-modeOptions Compile = compileOptions
 
 data OptErr
   = Errors (List1 String)
@@ -392,9 +339,7 @@ processFormat : FormatOptions -> Maybe String -> App Errs ()
 processFormat opts path = do
   t <- parseTerm path Nothing
   let layoutOpts = mkLayoutOpts opts
-  case opts.desugar of
-    True => printTerm layoutOpts (desugar t) opts.output
-    False => printTerm layoutOpts t opts.output
+  printTerm layoutOpts t opts.output
   where
   mkLayoutOpts : FormatOptions -> LayoutOptions
   mkLayoutOpts opts =
@@ -411,23 +356,13 @@ partial
 processCheck : CheckOptions -> Maybe String -> App Errs ()
 processCheck opts path = do
   t <- parseTerm path opts.type
-  let t = desugar t
   ignore (synthTerm t)
-
-partial
-processCompile : CompileOptions -> Maybe String -> App Errs ()
-processCompile opts path = do
-  t <- parseTerm path opts.type
-  let t = desugar t
-  Element _ prf <- synthTerm t
-  compileTerm prf opts.output
 
 partial
 Commands : List (String, (mode ** (ModeOptionTy mode -> Maybe String -> App Errs ())))
 Commands =
   [ (show Format, (Format ** processFormat))
   , (show Check, (Check ** processCheck))
-  , (show Compile, (Compile ** processCompile))
   ]
 
 partial
@@ -489,9 +424,6 @@ handleAllErrs arg0 =
           (UnboundTyVar str ctx) => "unbound type variable '\{str}'"
           (UnboundTmVar str ctx) => "unbound term variable '\{str}'"
           (DuplicateLabel str labels) => "repeated label '\{str}'"
-          (NeedsSugar mode) => "cannot use syntactic sugar here"
-          (NeedsQuote mode) => "cannot use splicing here"
-          NoQuotedTypes => "cannot write types within quotations"
     in interpolate (msg <$ e)
 
   partial
@@ -511,7 +443,6 @@ handleAllErrs arg0 =
     \{synopsis Global}
       format   \{synopsis Format}
       check    \{synopsis Check}
-      compile  \{synopsis Compile}
     """
     primIO exitSuccess
   handleOptErr (Help mode) = do

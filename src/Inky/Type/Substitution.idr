@@ -130,7 +130,7 @@ sub'Strengthen :
       (i = k)) ->
   Strengthen i a b ->
   (c ** Strengthen j (sub' env a) c)
-subAllStrengthen :
+sub'AllStrengthen :
   {as : Context (Ty ctx1)} ->
   {env : All (Assoc0 $ Thinned Ty ctx2) ctx1} ->
   ((k : Var ctx1) ->
@@ -138,7 +138,7 @@ subAllStrengthen :
       (Strengthen j (indexAll k.pos env).value.extract)
       (i = k)) ->
   StrengthenAll i as bs ->
-  (cs ** (StrengthenAll j (subAll env as) cs, cs.names = as.names))
+  (cs ** (StrengthenAll j (sub'All env as) cs, cs.names = as.names))
 
 sub'Strengthen envStr (TVar {j = k1, k = k2} eq) =
   case envStr k1 of
@@ -154,10 +154,10 @@ sub'Strengthen envStr (TArrow prf1 prf2) =
   let (b ** prf2) = sub'Strengthen envStr prf2 in
   (TArrow a b ** TArrow prf1 prf2)
 sub'Strengthen envStr (TProd {as = MkRow as fresh} prfs) =
-  let (as ** (prfs, eq)) = subAllStrengthen envStr prfs in
+  let (as ** (prfs, eq)) = sub'AllStrengthen envStr prfs in
   (TProd (MkRow as (rewrite eq in fresh)) ** TProd prfs)
 sub'Strengthen envStr (TSum {as = MkRow as fresh} prfs) =
-  let (as ** (prfs, eq)) = subAllStrengthen envStr prfs in
+  let (as ** (prfs, eq)) = sub'AllStrengthen envStr prfs in
   (TSum (MkRow as (rewrite eq in fresh)) ** TSum prfs)
 sub'Strengthen envStr (TFix {x} prf) =
   let (a ** prf) = sub'Strengthen envStr' prf in
@@ -190,9 +190,9 @@ sub'Strengthen envStr (TFix {x} prf) =
       (\eq => cong ThereVar eq) $
     envStr (%% name)
 
-subAllStrengthen envStr [<] = ([<] ** ([<], Refl))
-subAllStrengthen envStr ((:<) prfs {l} prf) =
-  let (cs ** (prfs, eq)) = subAllStrengthen envStr prfs in
+sub'AllStrengthen envStr [<] = ([<] ** ([<], Refl))
+sub'AllStrengthen envStr ((:<) prfs {l} prf) =
+  let (cs ** (prfs, eq)) = sub'AllStrengthen envStr prfs in
   let (c ** prf) = sub'Strengthen envStr prf in
   (cs :< (l :- c) ** (prfs :< prf, cong (:< l) eq))
 
@@ -226,7 +226,7 @@ sub'StrictlyPositive :
       (i = k, j `StrictlyPositiveIn` (indexAll k.pos env).value.extract)) ->
   i `StrictlyPositiveIn` a ->
   j `StrictlyPositiveIn` sub' env a
-subAllStrictlyPositive :
+sub'AllStrictlyPositive :
   {as : Context (Ty ctx1)} ->
   {env : All (Assoc0 $ Thinned Ty ctx2) ctx1} ->
   ((k : Var ctx1) ->
@@ -234,7 +234,7 @@ subAllStrictlyPositive :
       (Strengthen j (indexAll k.pos env).value.extract)
       (i = k, j `StrictlyPositiveIn` (indexAll k.pos env).value.extract)) ->
   i `StrictlyPositiveInAll` as ->
-  j `StrictlyPositiveInAll` subAll env as
+  j `StrictlyPositiveInAll` sub'All env as
 
 sub'StrictlyPositive envSp (TVar {j = k}) =
   case envSp k of
@@ -245,8 +245,8 @@ sub'StrictlyPositive envSp (TArrow (TArrow prf1 prf2)) =
   let (_ ** str1) = sub'Strengthen envStr prf1 in
   let (_ ** str2) = sub'Strengthen envStr prf2 in
   TArrow (TArrow str1 str2)
-sub'StrictlyPositive envSp (TProd {as = MkRow _ _} prfs) = TProd (subAllStrictlyPositive envSp prfs)
-sub'StrictlyPositive envSp (TSum {as = MkRow _ _} prfs) = TSum (subAllStrictlyPositive envSp prfs)
+sub'StrictlyPositive envSp (TProd {as = MkRow _ _} prfs) = TProd (sub'AllStrictlyPositive envSp prfs)
+sub'StrictlyPositive envSp (TSum {as = MkRow _ _} prfs) = TSum (sub'AllStrictlyPositive envSp prfs)
 sub'StrictlyPositive envSp (TFix {x} prf) =
   TFix (sub'StrictlyPositive envSp' prf)
   where
@@ -281,9 +281,9 @@ sub'StrictlyPositive envSp (TFix {x} prf) =
           renameStrictlyPositive (Drop Id) prf)) $
     envSp (%% name)
 
-subAllStrictlyPositive envSp [<] = [<]
-subAllStrictlyPositive envSp (prfs :< prf) =
-  subAllStrictlyPositive envSp prfs :< sub'StrictlyPositive envSp prf
+sub'AllStrictlyPositive envSp [<] = [<]
+sub'AllStrictlyPositive envSp (prfs :< prf) =
+  sub'AllStrictlyPositive envSp prfs :< sub'StrictlyPositive envSp prf
 
 -- Well Formedness -------------------------------------------------------------
 
@@ -305,18 +305,18 @@ sub'Wf :
   DAll (\ty => WellFormed ty.value) env ->
   WellFormed a ->
   WellFormed (sub' env a)
-subAllWf :
+sub'AllWf :
   {as : Context (Ty ctx1)} ->
   {env : All (Assoc0 $ Thinned Ty ctx2) ctx1} ->
   DAll (\ty => WellFormed ty.value) env ->
   AllWellFormed as ->
-  AllWellFormed (subAll env as)
+  AllWellFormed (sub'All env as)
 
 sub'Wf envWf (TVar {i}) =
   renameWf (indexAll i.pos env).value.thins (indexDAll i.pos envWf)
 sub'Wf envWf (TArrow wf1 wf2) = TArrow (sub'Wf envWf wf1) (sub'Wf envWf wf2)
-sub'Wf envWf (TProd {as = MkRow _ _} wfs) = TProd (subAllWf envWf wfs)
-sub'Wf envWf (TSum {as = MkRow _ _} wfs) = TSum (subAllWf envWf wfs)
+sub'Wf envWf (TProd {as = MkRow _ _} wfs) = TProd (sub'AllWf envWf wfs)
+sub'Wf envWf (TSum {as = MkRow _ _} wfs) = TSum (sub'AllWf envWf wfs)
 sub'Wf envWf (TFix {x} prf wf) =
   TFix
     (sub'StrictlyPositive envSp prf)
@@ -350,8 +350,8 @@ sub'Wf envWf (TFix {x} prf wf) =
     in
     Just b `Because` prf
 
-subAllWf envWf [<] = [<]
-subAllWf envWf (wfs :< wf) = subAllWf envWf wfs :< sub'Wf envWf wf
+sub'AllWf envWf [<] = [<]
+sub'AllWf envWf (wfs :< wf) = sub'AllWf envWf wfs :< sub'Wf envWf wf
 
 export
 subWf :

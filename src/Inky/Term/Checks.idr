@@ -15,6 +15,7 @@ import Inky.Term
 import Inky.Term.Recompute
 
 %hide Prelude.Ops.infixl.(>=>)
+%ambiguity_depth 5
 
 -- Synthesis gives unique types
 
@@ -159,6 +160,29 @@ checksSplit (FoldC {y, t, b} prf1 prf2) (FoldNC3 prf1' contra) =
         contra
   in
   checksSplit prf2 contra
+checksSplit (FoldCaseC {as} prf prfs) (FoldCaseNC1 contra) = synthsSplit prf contra
+checksSplit (FoldCaseC {x, as} prf prfs) (FoldCaseNC2 prf' contra) =
+  void $ contra x as $ synthsUnique prf' prf
+checksSplit (FoldCaseC {b, x, as, ts} prf prfs) (FoldCaseNC3 {x = x', as = as'} prf' contras) =
+  allBranchesSplit fresh prfs contras'
+  where
+  0 fresh : AllFresh (subAll [<_ :- b] as.context).names
+  fresh = rewrite subAllNames [<_ :- b] as.context in as.fresh
+
+  0 eq :
+    forall tyEnv, tmEnv, e, x, y, as, bs. 
+    Synths tyEnv tmEnv e (TFix x (TSum as)) ->
+    Synths tyEnv tmEnv e (TFix y (TSum bs)) ->
+    the (x ** Row (Ty [<x])) (x ** as) === (y ** bs)
+  eq prf1 prf2 with (fixInjective (synthsUnique prf1 prf2))
+    _ | Refl = Refl
+
+  contras' : AnyNotBranches tyEnv tmEnv (subAll [<_ :- b] as.context) b ts.context
+  contras' =
+    replace
+      {p = \(x ** as) => AnyNotBranches tyEnv tmEnv (subAll [<_ :- b] as.context) b ts.context}
+      (eq prf' prf)
+      contras
 
 checkSpineSplit (prf :: prfs) (Step1 contra) = void $ contra _ _ Refl
 checkSpineSplit (prf :: prfs) (Step2 contras) =
@@ -211,23 +235,23 @@ export
 synths :
   (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
   (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
-  (e : Term NoSugar m tyCtx tmCtx) ->
+  (e : Term m tyCtx tmCtx) ->
   Proof (Ty [<]) (Synths tyEnv tmEnv e) (NotSynths tyEnv tmEnv e)
 export
 checks :
   (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
   (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
-  (a : Ty [<]) -> (t : Term NoSugar m tyCtx tmCtx) ->
+  (a : Ty [<]) -> (t : Term m tyCtx tmCtx) ->
   LazyEither (Checks tyEnv tmEnv a t) (NotChecks tyEnv tmEnv a t)
 checkSpine :
   (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
   (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
-  (a : Ty [<]) -> (ts : List (Term NoSugar m tyCtx tmCtx)) ->
+  (a : Ty [<]) -> (ts : List (Term m tyCtx tmCtx)) ->
   Proof (Ty [<]) (CheckSpine tyEnv tmEnv a ts) (NotCheckSpine tyEnv tmEnv a ts)
 allSynths :
   (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
   (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
-  (es : Context (Term NoSugar m tyCtx tmCtx)) ->
+  (es : Context (Term m tyCtx tmCtx)) ->
   (0 fresh : AllFresh es.names) ->
   Proof (Subset (Row (Ty [<])) (\as => es.names = as.names))
     (AllSynths tyEnv tmEnv es . Subset.fst)
@@ -235,13 +259,13 @@ allSynths :
 allChecks :
   (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
   (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
-  (as : Context (Ty [<])) -> (ts : Context (Term NoSugar m tyCtx tmCtx)) ->
+  (as : Context (Ty [<])) -> (ts : Context (Term m tyCtx tmCtx)) ->
   LazyEither (AllChecks tyEnv tmEnv as ts) (AnyNotChecks tyEnv tmEnv as ts)
 allBranches :
   (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
   (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
   (as : Context (Ty [<])) -> (a : Ty [<]) ->
-  (ts : Context (x ** Term NoSugar m tyCtx (tmCtx :< x))) ->
+  (ts : Context (x ** Term m tyCtx (tmCtx :< x))) ->
   LazyEither (AllBranches tyEnv tmEnv as a ts) (AnyNotBranches tyEnv tmEnv as a ts)
 
 synths tyEnv tmEnv (Annot _ t a) =
@@ -322,6 +346,7 @@ synths tyEnv tmEnv (Map _ (x ** a) b c) =
   pure _ $
   map (\(wf1, wf2, wf3) => MapS wf1 wf2 wf3) MapNS $
   all (wellFormed (TFix x a)) (all (wellFormed b) (wellFormed c))
+synths tyEnv tmEnv (FoldCase _ e (MkRow ts _)) = Nothing `Because` ChecksNS FoldCase
 
 checks tyEnv tmEnv a (Annot meta t b) = fallbackCheck Annot (synths tyEnv tmEnv $ Annot meta t b) a
 checks tyEnv tmEnv a (Var meta i) = fallbackCheck Var (synths tyEnv tmEnv $ Var meta i) a
@@ -467,6 +492,45 @@ checks tyEnv tmEnv a (Fold _ e (x ** t)) =
   false (Right (.(TFix y b) ** (prf1, Right ((y ** b) ** (Refl, contra))))) = FoldNC3 prf1 contra
 checks tyEnv tmEnv a (Map meta (x ** b) c d) =
   fallbackCheck Map (synths tyEnv tmEnv $ Map meta (x ** b) c d) a
+checks tyEnv tmEnv a (FoldCase _ e (MkRow ts fresh)) =
+  map true false $
+  (b <- synths tyEnv tmEnv e) >=>
+  (xc <- isFix b) >=>
+  (as <- isSum (snd xc)) >=>
+  allBranches tyEnv tmEnv (subAll [<_ :- a] as.context) a ts
+  where
+  true :
+    forall fresh.
+    (b ** (Synths tyEnv tmEnv e b,
+      (xc : (x ** Ty [<x]) ** (b = TFix (fst xc) (snd xc),
+        (as ** (snd xc = TSum as,
+          AllBranches tyEnv tmEnv (subAll [<_ :- a] as.context) a ts)))))) ->
+    Checks tyEnv tmEnv a (FoldCase meta e (MkRow ts fresh))
+  true (.(TFix x c) ** (prf, ((x ** c) ** (Refl, (as ** (eq, prfs)))))) =
+    FoldCaseC {x} {as} (rewrite sym eq in prf) prfs
+
+  synthTyContra :
+    forall c.
+    ((as : Row (Ty [<x])) -> Not (c = TSum as)) ->
+    (y : String) -> (as : Row (Ty [<y])) ->
+    Not (TFix x c = TFix y (TSum as))
+  synthTyContra contra _ as Refl = contra as Refl
+
+  false :
+    forall fresh.
+    Either (NotSynths tyEnv tmEnv e)
+      (b ** (Synths tyEnv tmEnv e b,
+        Either ((x : String) -> (c : Ty [<x]) -> Not (b = TFix x c))
+          (xc : (x : String ** Ty [<x]) ** (b = TFix (fst xc) (snd xc),
+            Either ((as : Row (Ty [<fst xc])) -> Not (snd xc = TSum as))
+              (as ** (snd xc = TSum as,
+                AnyNotBranches tyEnv tmEnv (subAll [<_ :- a] as.context) a ts)))))) ->
+    NotChecks tyEnv tmEnv a (FoldCase meta e (MkRow ts fresh))
+  false (Left contra) = FoldCaseNC1 contra
+  false (Right (b ** (prf, (Left contra)))) = FoldCaseNC2 prf (\x, as => contra x (TSum as))
+  false (Right (.(TFix x c) ** (prf, (Right ((x ** c) ** (Refl, (Left contra))))))) = FoldCaseNC2 prf (synthTyContra contra)
+  false (Right (.(TFix x c) ** (prf, (Right ((x ** c) ** (Refl, (Right (as ** (eq, contra))))))))) =
+    FoldCaseNC3 {x} {as} (rewrite sym eq in prf) contra
 
 checkSpine tyEnv tmEnv a [] = Just a `Because` []
 checkSpine tyEnv tmEnv a (t :: ts) =

@@ -43,21 +43,10 @@ Ord InkyPrec where
 
 export
 prettyType : {ctx : SnocList String} -> Ty ctx -> InkyPrec -> Doc ann
-lessPrettyType : {ctx : SnocList String} -> Ty ctx -> InkyPrec -> Doc ann
-lessPrettyTypeCtx : {ctx : SnocList String} -> Context (Ty ctx) -> InkyPrec -> SnocList (Doc ann)
+prettyTypeCtx : {ctx : SnocList String} -> Context (Ty ctx) -> InkyPrec -> SnocList (Doc ann)
 
-prettyType a d =
-  if does (alpha {ctx2 = [<]} a TNat)
-  then pretty "Nat"
-  else case isList a of
-    Just b =>
-      group $ align $ hang 2 $ parenthesise (d < App) $
-        pretty "List" <+> line <+>
-        prettyType (assert_smaller a b) Atom
-    Nothing => lessPrettyType a d
-
-lessPrettyType (TVar i) d = pretty (unVal $ nameOf i)
-lessPrettyType (TArrow a b) d =
+prettyType (TVar i) d = pretty (unVal $ nameOf i)
+prettyType (TArrow a b) d =
   group $ align $ parenthesise (d < Open) $
     let parts = stripArrow b in
     concatWith (surround $ neutral <++> "->" <+> line) (prettyType a App :: parts)
@@ -65,23 +54,30 @@ lessPrettyType (TArrow a b) d =
   stripArrow : Ty ctx -> List (Doc ann)
   stripArrow (TArrow a b) = prettyType a App :: stripArrow b
   stripArrow a = [prettyType a App]
-lessPrettyType (TProd (MkRow as _)) d =
-  let parts = lessPrettyTypeCtx as Open <>> [] in
+prettyType (TProd (MkRow as _)) d =
+  let parts = prettyTypeCtx as Open <>> [] in
   group $ align $ enclose "<" ">" $
     flatAlt
       (neutral <++> concatWith (surround $ line <+> ";" <++> neutral) parts <+> line)
       (concatWith (surround $ ";" <++> neutral) parts)
-lessPrettyType (TSum (MkRow as _)) d =
-  let parts = lessPrettyTypeCtx as Open <>> [] in
+prettyType (TSum (MkRow as _)) d =
+  let parts = prettyTypeCtx as Open <>> [] in
   group $ align $ enclose "[" "]" $
     flatAlt
       (neutral <++> concatWith (surround $ line <+> ";" <++> neutral) parts <+> line)
       (concatWith (surround $ ";" <++> neutral) parts)
-lessPrettyType (TFix x a) d =
+prettyType (TFix x a) d =
   group $ align $ hang 2 $ parenthesise (d < App) $
     pretty "data" <++> pretty x <+> line <+> prettyType a Atom
 
-lessPrettyTypeCtx [<] d = [<]
-lessPrettyTypeCtx (as :< (x :- a)) d =
-  lessPrettyTypeCtx as d :<
+prettyTypeCtx [<] d = [<]
+prettyTypeCtx (as :< (x :- a)) d =
+  prettyTypeCtx as d :<
   (group $ align $ pretty x <+> ":" <+> line <+> prettyType a d)
+
+export
+prettyBoundType : {ctx : SnocList String} -> (x ** Ty (ctx :< x)) -> InkyPrec -> Doc ann
+prettyBoundType (bound ** a) d = 
+  hang 2 $ group $ parenthesise (d < Open) $
+   "\\" <+> pretty bound <++> "=>" <+> line <+> 
+   prettyType a Open

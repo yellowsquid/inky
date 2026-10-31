@@ -21,11 +21,12 @@ Pretty (ChecksOnly t) where
   pretty Case = "case split"
   pretty Roll = "rolling"
   pretty Fold = "fold"
+  pretty FoldCase = "foldcase"
 
 export
 prettyNotSynths :
   {tyCtx, tmCtx : SnocList String} ->
-  {e : Term NoSugar m tyCtx tmCtx} ->
+  {e : Term m tyCtx tmCtx} ->
   {tyEnv : _} -> {tmEnv : _} ->
   NotSynths tyEnv tmEnv e ->
   List (m, Doc ann)
@@ -33,33 +34,33 @@ export
 prettyNotChecks :
   {tyCtx, tmCtx : SnocList String} ->
   {a : Ty [<]} ->
-  {t : Term NoSugar m tyCtx tmCtx} ->
+  {t : Term m tyCtx tmCtx} ->
   {tyEnv : _} -> {tmEnv : _} ->
   NotChecks tyEnv tmEnv a t ->
   List (m, Doc ann)
 prettyNotCheckSpine :
   {tyCtx, tmCtx : SnocList String} ->
   {a : Ty [<]} ->
-  {ts : List (Term NoSugar m tyCtx tmCtx)} ->
+  {ts : List (Term m tyCtx tmCtx)} ->
   {tyEnv : _} -> {tmEnv : _} ->
   NotCheckSpine tyEnv tmEnv a ts ->
   List (m, Doc ann)
 prettyAnyNotSynths :
   {tyCtx, tmCtx : SnocList String} ->
-  {es : Context (Term NoSugar m tyCtx tmCtx)} ->
+  {es : Context (Term m tyCtx tmCtx)} ->
   {tyEnv : _} -> {tmEnv : _} ->
   AnyNotSynths tyEnv tmEnv es ->
   List (m, Doc ann)
 prettyAnyNotChecks :
   {tyCtx, tmCtx : SnocList String} ->
-  {ts : Context (Term NoSugar m tyCtx tmCtx)} ->
+  {ts : Context (Term m tyCtx tmCtx)} ->
   {tyEnv : _} -> {tmEnv : _} -> {as : Context _} ->
   (meta : m) ->
   AnyNotChecks tyEnv tmEnv as ts ->
   List (m, Doc ann)
 prettyAnyNotBranches :
   {tyCtx, tmCtx : SnocList String} ->
-  {ts : Context (x ** Term NoSugar m tyCtx (tmCtx :< x))} ->
+  {ts : Context (x ** Term m tyCtx (tmCtx :< x))} ->
   {tyEnv : _} -> {tmEnv : _} -> {as : Context _} -> {a : _} ->
   (meta : m) ->
   AnyNotBranches tyEnv tmEnv as a ts ->
@@ -185,6 +186,13 @@ prettyNotChecks (FoldNC2 prf contra) =
 prettyNotChecks (FoldNC3 prf contra) =
   case synthsRecompute prf of
     Val _ => prettyNotChecks contra
+prettyNotChecks (FoldCaseNC1 contra) = prettyNotSynths contra
+prettyNotChecks (FoldCaseNC2 prf contra) =
+  case synthsRecompute prf of
+    Val a => [(t.meta, pretty "cannot fold and case split over type" <+> line <+> prettyType a Open)]
+prettyNotChecks (FoldCaseNC3 prf contras) =
+  case synthsRecompute prf of
+    Val _ => prettyAnyNotBranches t.meta contras
 
 prettyNotCheckSpine (Step1 {t} contra) =
   [(t.meta, pretty "cannot apply non-function type" <+> line <+> prettyType a Open)]

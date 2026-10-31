@@ -1,0 +1,2151 @@
+let Ord =
+  [LT: <>; EQ: <>; GT: <>]
+in
+let id (n : Nat) : Nat =
+  n
+in
+let compare (k : Nat) : Nat -> Ord =
+  -- Compare two naturals.
+  foldcase k by
+    { Z u => \n => case !n of {Z u => EQ u; S n => LT u}
+    ; S k => \n => case !n of {Z u => GT u; S n => k n}
+    }
+in
+let pred (k : Nat) : Nat =
+  -- Predecessor of a natural.
+  case !k of {Z u => 0; S k => k}
+in
+let drop (n : Nat) : Nat -> Nat =
+  -- Exclude the `n' innermost variables.
+  foldcase n by {Z u => \k => k; S f => \k => suc (f k)}
+in
+let shift (f : Nat -> Nat) (k : Nat) : Nat =
+  -- Lift a function by suc.
+  case !k of {Z u => 0; S k => suc (f k)}
+in
+let ArtystType =
+  -- Input types.
+  data Ty [Var: Nat; N: <>; Arrow: <Dom: Ty; Cod: Ty>; Prod: List Ty; Sum: List Ty; L: Ty; Fix: Ty]
+in
+let ArtystTerm =
+  -- Input terms.
+  -- Roll.Type, Unroll.Type and Fold.TypeFrom have one free variable.
+  data Term
+    [ Var: Nat
+    ; Zero: <>
+    ; Suc: Term
+    ; Rec: <Target: Term; Zero: Term; Suc: Term>
+    ; Abs: Term
+    ; App: <Fun: Term; Arg: Term>
+    ; Let: <Bound: Term; Body: Term>
+    ; Tuple: List <Type: ArtystType; Val: Term>
+    ; Project: <Target: Term; Types: List ArtystType; Which: Nat>
+    ; Inject: <Types: List ArtystType; Which: Nat; Val: Term>
+    ; Match: <Return: ArtystType; Target: Term; Cases: List <Type: ArtystType; Body: Term>>
+    ; UnrollNat: Term
+    ; Nil: ArtystType
+    ; Cons: <Type: ArtystType; Head: Term; Tail: Term>
+    ; UnrollList: <Type: ArtystType; Target: Term>
+    ; FoldList: <TypeFrom: ArtystType; TypeTo: ArtystType; Target: Term; Nil: Term; Cons: Term>
+    ; Roll: <Type: ArtystType; Val: Term>
+    ; Unroll: <Type: ArtystType; Target: Term>
+    ; Fold: <TypeFrom: ArtystType; TypeTo: ArtystType; Target: Term; Body: Term>
+    ]
+in
+let renameType (ty : ArtystType) : (Nat -> Nat) -> ArtystType =
+  -- Rename types.
+  foldcase ty by
+    { Var n => \f => ~(Var (f n))
+    ; N u => \f => ~(N u)
+    ; Arrow x => \f => ~(Arrow <Dom: x.Dom f; Cod: x.Cod f>)
+    ; Prod x => \f =>
+      ~(Prod (map (\X => List X) ((Nat -> Nat) -> ArtystType) ArtystType (\x => x f) x))
+    ; Sum x => \f =>
+      ~(Sum (map (\X => List X) ((Nat -> Nat) -> ArtystType) ArtystType (\x => x f) x))
+    ; L x => \f => ~(L (x f))
+    ; Fix x => \f => ~(Fix (x (shift f)))
+    }
+in
+let Phase1Term =
+  -- Terms after phase 1.
+  -- Roll2.Type, Unroll.Type and Fold.TypeFrom have one free variable.
+  data Term
+    [ Var: Nat
+    ; Zero: <>
+    ; Suc: Term
+    ; Rec: <Target: Term; Zero: Term; Suc: Term>
+    ; Abs: Term
+    ; App: <Fun: Term; Arg: Term>
+    ; Let: <Bound: Term; Body: Term>
+    ; Tuple: List <Type: ArtystType; Val: Term>
+    ; Project: <Target: Term; Types: List ArtystType; Which: Nat>
+    ; Inject: <Types: List ArtystType; Which: Nat; Val: Term>
+    ; Match: <Return: ArtystType; Target: Term; Cases: List <Type: ArtystType; Body: Term>>
+    ; UnrollNat: Term
+    ; Nil: ArtystType
+    ; Cons: <Type: ArtystType; Head: Term; Tail: Term>
+    ; Snoc: <Type: ArtystType; Tail: Term; Head: Term>
+    ; Length: <Type: ArtystType; Target: Term>
+    ; UnrollList: <Type: ArtystType; Target: Term>
+    ; FoldList: <TypeFrom: ArtystType; TypeTo: ArtystType; Target: Term; Nil: Term; Cons: Term>
+    ; Roll2: <Type: ArtystType; Shape: Term; Components: Term>
+    ; Unroll: <Type: ArtystType; Target: Term>
+    ; Fold: <TypeFrom: ArtystType; TypeTo: ArtystType; Target: Term; Body: Term>
+    ]
+in
+let phase1LetAll (bound : List Phase1Term) : Phase1Term -> Phase1Term =
+  foldcase bound by {N u => \body => body; C x => \body => ~(Let <Bound: x.H; Body: x.T body>)}
+in
+let renamePhase1 (t : Phase1Term) : (Nat -> Nat) -> Phase1Term =
+  -- Rename terms.
+  foldcase t by
+    { Var n => \f => ~(Var (f n))
+    ; Zero u => \f => ~(Zero u)
+    ; Suc x => \f => ~(Suc (x f))
+    ; Rec x => \f => ~(Rec <Target: x.Target f; Zero: x.Zero f; Suc: x.Suc (shift f)>)
+    ; Abs x => \f => ~(Abs (x (shift f)))
+    ; App x => \f => ~(App <Fun: x.Fun f; Arg: x.Arg f>)
+    ; Let x => \f => ~(Let <Bound: x.Bound f; Body: x.Body (shift f)>)
+    ; UnrollNat x => \f => ~(UnrollNat (x f))
+    ; Tuple x => \f =>
+      ~(Tuple
+         (map
+           (\X => List <Type: ArtystType; Val: X>)
+           ((Nat -> Nat) -> Phase1Term)
+           Phase1Term
+           (\x => x f)
+           x))
+    ; Project x => \f => ~(Project <Target: x.Target f; Types: x.Types; Which: x.Which>)
+    ; Inject x => \f => ~(Inject <Types: x.Types; Which: x.Which; Val: x.Val f>)
+    ; Match x => \f =>
+      ~(Match
+         < Return: x.Return
+         ; Target: x.Target f
+         ; Cases:
+           map
+             (\X => List <Type: ArtystType; Body: X>)
+             ((Nat -> Nat) -> Phase1Term)
+             Phase1Term
+             (\x => x (shift f))
+             x.Cases
+         >)
+    ; Nil x => \f => ~(Nil x)
+    ; Cons x => \f => ~(Cons <Type: x.Type; Head: x.Head f; Tail: x.Tail f>)
+    ; Snoc x => \f => ~(Snoc <Type: x.Type; Head: x.Head f; Tail: x.Tail f>)
+    ; Length x => \f => ~(Length <Type: x.Type; Target: x.Target f>)
+    ; UnrollList x => \f => ~(UnrollList <Type: x.Type; Target: x.Target f>)
+    ; FoldList x => \f =>
+      ~(FoldList
+         < TypeFrom: x.TypeFrom
+         ; TypeTo: x.TypeTo
+         ; Target: x.Target f
+         ; Nil: x.Nil f
+         ; Cons: x.Cons (shift f)
+         >)
+    ; Roll2 x => \f => ~(Roll2 <Type: x.Type; Shape: x.Shape f; Components: x.Components f>)
+    ; Unroll x => \f => ~(Unroll <Type: x.Type; Target: x.Target f>)
+    ; Fold x => \f =>
+      ~(Fold <TypeFrom: x.TypeFrom; TypeTo: x.TypeTo; Target: x.Target f; Body: x.Body (shift f)>)
+    }
+in
+let BoxedType =
+  (Nat -> Nat) -> ArtystType
+in
+let ArtystTypeSubst =
+  -- For Insert: Type must be closed.
+  data Subst [Done: <>; Insert: <Into: Subst; Where: Nat; Type: ArtystType>; Keep: Subst]
+in
+let index (sub : ArtystTypeSubst) : Nat -> BoxedType =
+  foldcase sub by
+    { Done u => \n, f => ~(Var (f n))
+    ; Keep sub => \n => case !n of {Z u => \f => ~(Var (f 0)); S k => \f => sub k (\x => suc (f x))}
+    ; Insert x => \n =>
+      case compare n x.Where of {LT u => x.Into n; EQ u => \ren => x.Type; GT u => x.Into (pred n)}
+    }
+in
+let DistributeTy =
+  -- For Subst: the argument may be open.
+  -- For Terms: Sub, AccTy and ResultTy are closed.
+  --   Insert <Where: arg.Where; Into: arg.Sub> covers all type variables.
+  < Original: ArtystType
+  ; Subst: ArtystTypeSubst -> ArtystType
+  ; Map:
+    <Sub: ArtystTypeSubst; Where: Nat; DomTy: ArtystType; CodTy: ArtystType> ->
+    <Target: Phase1Term; Function: Phase1Term> ->
+    Phase1Term
+  ; Terms:
+    <Sub: ArtystTypeSubst; Where: Nat; AccTy: ArtystType; ResultTy: ArtystType> ->
+    <Components: Phase1Term; Shape: Phase1Term> ->
+    <Components: Phase1Term; Shape: Phase1Term>
+  >
+in
+let singleton (ty : ArtystType) : Phase1Term =
+  -- A ->
+  -- Term . (A -> List A -> <List A; Nat>)
+  ~(Abs
+     (\x ~>
+       ~(Abs
+          (\xs ~>
+            ~(Tuple
+               [ <Type: ~(L ty); Val: ~(Snoc <Type: ty; Head: `xs; Tail: `x>)>
+               ; <Type: ~(N <>); Val: ~(Length <Type: ty; Target: `xs>)>
+               ])))))
+in
+let distribute (shape : ArtystType) : DistributeTy =
+  -- distribute A :
+  --   < Original =  A
+  --   ; Rename: σ -> A[σ]
+  --   ; Subst: σ -> A[σ]
+  --   ; Map:
+  --      <σ; X; B; C> ->
+  --      < Target: Term Γ (A [σ || X / B ])
+  --      ; Function: Term Γ (B -> C)
+  --      > ->
+  --      Term Γ (A [σ || X / C ])
+  --   ; Terms:
+  --      <σ; X; B; C> ->
+  --      < Components: Term Γ (List B)
+  --      ; Shape: Term Γ (A [σ || X / List B -> <List B; C> ])
+  --      > ->
+  --      <Components: Term Γ (List B); Shape: Term Γ (A [ σ || X / C ])>>
+  foldcase shape by
+    { Var n =>
+      < Original: ~(Var n)
+      ; Subst: \sub => index sub n id
+      ; Map: \tys, terms =>
+        case compare tys.Where n of
+          { LT u => terms.Target
+          ; EQ u => ~(App <Fun: terms.Function; Arg: terms.Target>)
+          ; GT u => terms.Target
+          }
+      ; Terms: \tys, terms =>
+        case compare tys.Where n of
+          { LT u => terms
+          ; EQ u =>
+            let comment =
+              -- t:   Term Γ (List B -> <List B; C>)
+              -- acc: Term Γ (List B)
+              ----
+              -- Components: Γ Term (List B)
+              -- Shape: Term Γ C
+              <>
+            in
+            let applied : Phase1Term =
+              ~(App <Fun: terms.Shape; Arg: terms.Components>)
+            in
+            < Components:
+              ~(Project <Target: applied; Types: [~(L tys.AccTy); tys.ResultTy]; Which: 0>)
+            ; Shape: ~(Project <Target: applied; Types: [~(L tys.AccTy); tys.ResultTy]; Which: 1>)
+            >
+          ; GT u => terms
+          }
+      >
+    ; N u =>
+      < Original: ~(N u)
+      ; Subst: \sub => ~(N u)
+      ; Map: \tys, terms => terms.Target
+      ; Terms: \tys, terms => terms
+      >
+    ; Arrow x =>
+      let orig : ArtystType =
+        ~(Arrow <Dom: x.Dom.Original; Cod: x.Cod.Original>)
+      in
+      < Original: orig
+      ; Subst: \sub => orig
+      ; Map: \tys, terms => terms.Target
+      ; Terms: \tys, terms => terms
+      >
+    ; Prod x =>
+      < Original: ~(Prod (map (\X => List X) DistributeTy ArtystType (\x => x.Original) x))
+      ; Subst: \sub => ~(Prod (map (\X => List X) DistributeTy ArtystType (\x => x.Subst sub) x))
+      ; Map: \tys, terms =>
+        let prodHelper : (Nat -> Phase1Term) -> List <Type: ArtystType; Val: Phase1Term> =
+          foldcase x by
+            { N u => \project => []
+            ; C x => \project =>
+              cons
+                < Type: x.H.Subst ~(Insert <Into: tys.Sub; Where: tys.Where; Type: tys.CodTy>)
+                ; Val: x.H.Map tys <Function: terms.Function; Target: project 0>
+                >
+                (x.T (\k => project (suc k)))
+            }
+        in
+        ~(Tuple
+           (prodHelper
+             (\n =>
+               ~(Project
+                  < Target: terms.Target
+                  ; Which: n
+                  ; Types:
+                    map
+                      (\X => List X)
+                      DistributeTy
+                      ArtystType
+                      (\x => x.Subst ~(Insert <Into: tys.Sub; Where: tys.Where; Type: tys.DomTy>))
+                      x
+                  >))))
+      ; Terms: \tys, terms =>
+        let comment =
+          -- t: Term Γ (Π Aᵢ[ X / List B -> <List B; C> ])
+          -- acc: Term Γ (List B)
+          ----
+          -- Components: Term Γ (List B)
+          -- Shape: Term Γ (Π Aᵢ[ X / C ])
+          <>
+        in
+        let prodHelper
+          : Nat ->
+            (Nat -> Phase1Term) ->
+            Nat ->
+            Phase1Term ->
+            < Components: Phase1Term
+            ; Shape: (Nat -> List <Type: ArtystType; Val: Phase1Term> -> Phase1Term) -> Phase1Term
+            > =
+          -- (k = |Bᵢ|) ->
+          -- (j -> Term Γ (Bᵢ 🐟 Aᵢ[ σ || X / List B -> <List B; C> ])ⱼ) ->
+          -- (n = |Δ|) ->
+          -- Term (Γ, Δ) (List B) ->
+          -- < Components: Term (Γ, Δ) (List B)
+          -- ; Shape:
+          --   ((o = |Θ|) -> All (\A => <Type = A[ σ || X / C ]; Val: Term (Γ, Δ, Θ) (A[ σ || X / C ])>) Aᵢ ->
+          --     Term (Γ, Δ, Θ) (List B) -> Term (Γ, Δ, Θ) D) ->
+          --   Term (Γ, Δ) D
+          -- >
+          foldcase x by
+            { N u => \k, proj, n, acc => <Components: acc; Shape: \construct => construct 0 []>
+            ; C x => \k, proj, n, acc =>
+              < Components:
+                (x.H.Terms tys <Shape: renamePhase1 (proj k) (drop n); Components: acc>).Shape
+              ; Shape: \construct =>
+                phase1LetAll
+                  [ (x.H.Terms tys <Shape: renamePhase1 (proj k) (drop n); Components: acc>).Shape
+                  ; (x.H.Terms
+                      tys
+                      < Shape: renamePhase1 (proj k) (drop (suc n))
+                      ; Components: renamePhase1 acc (drop 1)
+                      >)
+                      .Components
+                  ]
+                  (\shape, acc ~>
+                    let comment =
+                      -- Shift one elem from Aᵢ to Bᵢ, so increase k.
+                      -- Bind two local vars for the result, so increase n by 2.
+                      -- When calling construct, shift the two local vars from Δ into Θ,
+                      --   so increase o by 2.
+                      <>
+                    in
+                    (x.T (suc k) proj (suc (suc n)) `acc).Shape
+                      (\o, xs =>
+                        construct
+                          (suc (suc o))
+                          (cons
+                            < Type:
+                              x.H.Subst
+                                ~(Insert <Where: tys.Where; Type: tys.ResultTy; Into: tys.Sub>)
+                            ; Val: renamePhase1 `shape (drop o)
+                            >
+                            xs)))
+              >
+            }
+        in
+        let pair =
+          prodHelper
+            0
+            (\j =>
+              ~(Project
+                 < Target: terms.Shape
+                 ; Which: j
+                 ; Types:
+                   map
+                     (\X => List X)
+                     DistributeTy
+                     ArtystType
+                     (\x =>
+                       x.Subst
+                         ~(Insert
+                            < Where: tys.Where
+                            ; Type:
+                              ~(Arrow
+                                 <Dom: ~(L tys.AccTy); Cod: ~(Prod [~(L tys.AccTy); tys.ResultTy])>)
+                            ; Into: tys.Sub
+                            >))
+                     x
+                 >))
+            0
+            terms.Components
+        in
+        <Components: pair.Components; Shape: pair.Shape (\o, xs => ~(Tuple xs))>
+      >
+    ; Sum x =>
+      < Original: ~(Sum (map (\X => List X) DistributeTy ArtystType (\x => x.Original) x))
+      ; Subst: \sub => ~(Sum (map (\X => List X) DistributeTy ArtystType (\x => x.Subst sub) x))
+      ; Map: \tys, terms =>
+        let wknFunction =
+          renamePhase1 terms.Function (drop 1)
+        in
+        let sumHelper
+          : (Nat -> Phase1Term -> Phase1Term) -> List <Type: ArtystType; Body: Phase1Term> =
+          foldcase x by
+            { N u => \inject => []
+            ; C x => \inject =>
+              cons
+                < Type: x.H.Subst ~(Insert <Into: tys.Sub; Where: tys.Where; Type: tys.DomTy>)
+                ; Body: \val ~> x.H.Map tys <Target: `val; Function: wknFunction>
+                >
+                (x.T (\k => inject (suc k)))
+            }
+        in
+        let tys =
+          map
+            (\X => List X)
+            DistributeTy
+            ArtystType
+            (\x => x.Subst ~(Insert <Into: tys.Sub; Where: tys.Where; Type: tys.CodTy>))
+            x
+        in
+        ~(Match
+           < Return: ~(Sum tys)
+           ; Target: terms.Target
+           ; Cases: sumHelper (\n, t => ~(Inject <Which: n; Val: t; Types: tys>))
+           >)
+      ; Terms: \tys, terms =>
+        let comment =
+          -- t: Term Γ (Σ Aᵢ[ σ || X / List B -> <List B; C> ])
+          -- acc: Term Γ (List B)
+          ----
+          -- Components: Term Γ (List B)
+          -- Shape: Term Γ (Σ Aᵢ[ σ || X / C ])
+          <>
+        in
+        let sumHelper
+          : (Nat -> Phase1Term -> Phase1Term) ->
+            List <Type: ArtystType; Components: Phase1Term; Shape: Phase1Term> =
+          -- (∀ {Γ} -> j -> Term Γ Aⱼ[ σ || X / C ] -> Term Γ (Σ (Bᵢ 🐟 Aᵢ[ σ || X / C ]))) ->
+          -- All
+          --   (\A =>
+          --      < Type = A[ X / List B -> <List B; C> ]
+          --      ; Components: Term (Γ, A[ σ || X / List B -> <List B; C> ]) (List B)
+          --      ; Shape: Term (Γ, A[ σ || X / List B -> <List B; C> ]) (Σ (Bᵢ 🐟 Aᵢ[ σ || X / C ]))
+          --      >)
+          --   Aᵢ
+          \target ~>
+            foldcase x by
+              { N u => \inject => []
+              ; C x => \inject =>
+                let rec =
+                  x.H.Terms tys <Shape: `target; Components: renamePhase1 terms.Components (drop 1)>
+                in
+                cons
+                  < Type:
+                    x.H.Subst
+                      ~(Insert
+                         < Where: tys.Where
+                         ; Type:
+                           ~(Arrow
+                              <Dom: ~(L tys.AccTy); Cod: ~(Prod [~(L tys.AccTy); tys.ResultTy])>)
+                         ; Into: tys.Sub
+                         >)
+                  ; Components: rec.Components
+                  ; Shape: inject 0 rec.Shape
+                  >
+                  (x.T (\j => inject (suc j)))
+              }
+        in
+        let resultTys =
+          map
+            (\X => List X)
+            DistributeTy
+            ArtystType
+            (\x => x.Subst ~(Insert <Where: tys.Where; Type: tys.ResultTy; Into: tys.Sub>))
+            x
+        in
+        let summed =
+          sumHelper (\k, t => ~(Inject <Types: resultTys; Which: k; Val: t>))
+        in
+        < Components:
+          ~(Match
+             < Return: ~(L tys.ResultTy)
+             ; Target: terms.Shape
+             ; Cases:
+               map
+                 (\X => List X)
+                 <Type: ArtystType; Components: Phase1Term; Shape: Phase1Term>
+                 <Type: ArtystType; Body: Phase1Term>
+                 (\x => <Type: x.Type; Body: x.Components>)
+                 summed
+             >)
+        ; Shape:
+          ~(Match
+             < Return: ~(Sum resultTys)
+             ; Target: terms.Shape
+             ; Cases:
+               map
+                 (\X => List X)
+                 <Type: ArtystType; Components: Phase1Term; Shape: Phase1Term>
+                 <Type: ArtystType; Body: Phase1Term>
+                 (\x => <Type: x.Type; Body: x.Shape>)
+                 summed
+             >)
+        >
+      >
+    ; L x =>
+      < Original: ~(L x.Original)
+      ; Subst: \sub => ~(L (x.Subst sub))
+      ; Map: \tys, terms =>
+        let wknFunction =
+          renamePhase1 terms.Function (drop 1)
+        in
+        let domTy =
+          x.Subst ~(Insert <Into: tys.Sub; Where: tys.Where; Type: tys.DomTy>)
+        in
+        let codTy =
+          x.Subst ~(Insert <Into: tys.Sub; Where: tys.Where; Type: tys.CodTy>)
+        in
+        ~(FoldList
+           < TypeFrom: domTy
+           ; TypeTo: ~(L codTy)
+           ; Target: terms.Target
+           ; Nil: ~(Nil codTy)
+           ; Cons:
+             let comment =
+               -- Term (Γ, <A [ σ || X / B ], List (A [ σ || X / C ])>) (List (A [ σ || X / C ]))
+               <>
+             in
+             \rec ~>
+               ~(Cons
+                  < Type: codTy
+                  ; Head:
+                    x.Map
+                      tys
+                      < Target: ~(Project <Target: `rec; Types: [domTy; ~(L codTy)]; Which: 0>)
+                      ; Function: wknFunction
+                      >
+                  ; Tail: ~(Project <Target: `rec; Types: [domTy; ~(L codTy)]; Which: 1>)
+                  >)
+           >)
+      ; Terms: \tys, terms =>
+        let comment =
+          -- t: Term Γ (List (A [ σ || X / List B -> <List B; C> ]))
+          -- acc: Term Γ (List B)
+          ----
+          -- Components: Term Γ (List B)
+          -- Shape: Term Γ (List (A [ σ || X / C ]))
+          <>
+        in
+        let arrowTy : ArtystType =
+          ~(Arrow <Dom: ~(L tys.AccTy); Cod: ~(Prod [~(L tys.AccTy); tys.ResultTy])>)
+        in
+        let arrowSub : ArtystTypeSubst =
+          ~(Insert <Where: tys.Where; Type: arrowTy; Into: tys.Sub>)
+        in
+        let resultSub : ArtystTypeSubst =
+          ~(Insert <Where: tys.Where; Type: tys.ResultTy; Into: tys.Sub>)
+        in
+        < Components:
+          ~(FoldList
+             < TypeFrom: x.Subst arrowSub
+             ; TypeTo: ~(L tys.AccTy)
+             ; Target: terms.Shape
+             ; Nil: terms.Components
+             ; Cons:
+               let comment =
+                 -- Need
+                 -- Term (Γ, <A [ σ || X / List B -> <List B; C> ], List B>) (List B)
+                 <>
+               in
+               \rec ~>
+                 (x.Terms
+                   tys
+                   < Shape: ~(Project <Target: `rec; Types: [arrowTy; ~(L tys.AccTy)]; Which: 0>)
+                   ; Components:
+                     ~(Project <Target: `rec; Types: [arrowTy; ~(L tys.AccTy)]; Which: 1>)
+                   >)
+                   .Components
+             >)
+        ; Shape:
+          ~(FoldList
+             < TypeFrom: x.Subst arrowSub
+             ; TypeTo: ~(Prod [~(L tys.AccTy); ~(L (x.Subst resultSub))])
+             ; Target: terms.Shape
+             ; Nil:
+               ~(Tuple
+                  [ <Type: ~(L tys.AccTy); Val: terms.Components>
+                  ; <Type: ~(L (x.Subst resultSub)); Val: ~(Nil (x.Subst resultSub))>
+                  ])
+             ; Cons: \rec ~>
+               let comment =
+                 -- Need
+                 -- Term
+                 --  (Γ, <A [ σ || X / List B -> <List B; C> ], <List B; List (A [ σ || X / C ])>>)
+                 --  (List B)
+                 <>
+               in
+               let elem : Phase1Term =
+                 -- Term _ (A [ σ || X / List B -> <List B; C> ])
+                 ~(Project
+                    < Target: `rec
+                    ; Types: [arrowTy; ~(Prod [~(L tys.AccTy); ~(L (x.Subst resultSub))])]
+                    ; Which: 0
+                    >)
+               in
+               let foldAcc : Phase1Term =
+                 -- Term _ <List B; List (A [ σ || X / C ])>
+                 ~(Project
+                    < Target: `rec
+                    ; Types: [arrowTy; ~(Prod [~(L tys.AccTy); ~(L (x.Subst resultSub))])]
+                    ; Which: 1
+                    >)
+               in
+               let acc : Phase1Term =
+                 -- Term _ (List B)
+                 ~(Project
+                    <Target: foldAcc; Types: [~(L tys.AccTy); ~(L (x.Subst resultSub))]; Which: 0>)
+               in
+               let shapes : Phase1Term =
+                 -- Term _ (List (A [ σ || X / C ]))
+                 ~(Project
+                    <Target: foldAcc; Types: [~(L tys.AccTy); ~(L (x.Subst resultSub))]; Which: 1>)
+               in
+               ~(Tuple
+                  [ < Type: ~(L tys.AccTy)
+                    ; Val: (x.Terms tys <Shape: elem; Components: acc>).Components
+                    >
+                  ; < Type: ~(L (x.Subst resultSub))
+                    ; Val:
+                      ~(Cons
+                         < Type: x.Subst resultSub
+                         ; Head: (x.Terms tys <Shape: elem; Components: acc>).Shape
+                         ; Tail: shapes
+                         >)
+                    >
+                  ])
+             >)
+        >
+      >
+    ; Fix x =>
+      let roll2 (sub : ArtystTypeSubst) (val : Phase1Term) : Phase1Term =
+        -- B = μ X (A [ σ || X / X ])
+        -- val: A [ σ || X / B ]
+        -- bound 1: A [ σ || X / List B -> <List B; Nat> ]
+        let resTy : ArtystType =
+          ~(Fix (x.Subst ~(Keep sub)))
+        in
+        ~(Let
+           < Bound:
+             x.Map
+               < Sub: sub
+               ; Where: 0
+               ; DomTy: resTy
+               ; CodTy: ~(Arrow <Dom: ~(L resTy); Cod: ~(Prod [~(L resTy); ~(N <>)])>)
+               >
+               <Target: val; Function: singleton resTy>
+           ; Body: \mapped ~>
+             ~(Tuple
+                [ < Type: ~(L resTy)
+                  ; Val:
+                    (x.Terms
+                      <Sub: sub; Where: 0; AccTy: ~(L resTy); ResultTy: ~(N <>)>
+                      <Components: ~(Nil resTy); Shape: `mapped>)
+                      .Components
+                  >
+                ; < Type: x.Subst ~(Insert <Into: sub; Where: 0; Type: ~(N <>)>)
+                  ; Val:
+                    (x.Terms
+                      <Sub: sub; Where: 0; AccTy: ~(L resTy); ResultTy: ~(N <>)>
+                      <Components: ~(Nil resTy); Shape: `mapped>)
+                      .Shape
+                  >
+                ])
+           >)
+      in
+      < Original: ~(Fix x.Original)
+      ; Subst: \sub => ~(Fix (x.Subst ~(Keep sub)))
+      ; Map: \tys, terms =>
+        ~(Fold
+           < TypeFrom: x.Subst ~(Keep ~(Insert <Into: tys.Sub; Where: tys.Where; Type: tys.DomTy>))
+           ; TypeTo:
+             ~(Fix (x.Subst ~(Keep ~(Insert <Into: tys.Sub; Where: tys.Where; Type: tys.CodTy>))))
+           ; Target: terms.Target
+           ; Body: \rec ~>
+             let comment =
+               -- rec : A [ σ || X / B || Y / μ Y (A [ σ || X/C || Y/Y ]) ]
+               <>
+             in
+             let finalSub : ArtystTypeSubst =
+               ~(Insert <Into: tys.Sub; Where: tys.Where; Type: tys.CodTy>)
+             in
+             roll2
+               finalSub
+               (x.Map
+                 < Sub: ~(Insert <Into: tys.Sub; Where: 0; Type: ~(Fix (x.Subst ~(Keep finalSub)))>)
+                 ; Where: suc tys.Where
+                 ; DomTy: tys.DomTy
+                 ; CodTy: tys.CodTy
+                 >
+                 <Target: `rec; Function: renamePhase1 terms.Function (drop 1)>)
+           >)
+      ; Terms: \tys, terms =>
+        let comment =
+          -- t: Term Γ (μ Y (A [ σ || X / List B -> <List B; C> || Y / Y ]))
+          -- acc: Term Γ (List B)
+          ----
+          -- Components: Term Γ (List B)
+          -- Shape: Term Γ (μ Y (A [ σ || X / C || Y / Y]))
+          <>
+        in
+        let mkResultTy (accTy : ArtystType) (resTy : ArtystType) : ArtystType =
+          ~(Arrow <Dom: ~(L accTy); Cod: ~(Prod [~(L accTy); resTy])>)
+        in
+        let finalResTy =
+          -- A [ σ || X/C || Y/Y ]
+          x.Subst ~(Keep ~(Insert <Where: tys.Where; Type: tys.ResultTy; Into: tys.Sub>))
+        in
+        let fixHelper : Phase1Term =
+          -- Term Γ (List B -> <List B; μ Y (A [ σ || X / C || Y / Y ])>)
+          ~(Fold
+             < TypeFrom:
+               x.Subst
+                 ~(Keep
+                    ~(Insert
+                       <Where: tys.Where; Type: mkResultTy tys.AccTy tys.ResultTy; Into: tys.Sub>))
+             ; TypeTo: mkResultTy tys.AccTy ~(Fix finalResTy)
+             ; Target: terms.Shape
+             ; Body:
+               let comment =
+                 -- var 1: A [  σ
+                 --          || X / List B -> <List B; C>
+                 --          || Y / List B -> <List B; μ Y (A [ σ || X/C || Y/Y])>
+                 --          ]
+                 -- var 0: List B
+                 -- bound 1: List B
+                 -- bound 2: A[σ || X/C || Y / List B -> <List B; μ Y A[σ || X/C || Y/Y]>]
+                 -- bound 3: List B
+                 -- bound 4: A[ σ || X/C || Y / μ Y (A[σ || X/C || Y/Y]) ]
+                 <>
+               in
+               let boundTys1
+                 : <Sub: ArtystTypeSubst; Where: Nat; AccTy: ArtystType; ResultTy: ArtystType> =
+                 < Sub:
+                   ~(Insert
+                      < Into: tys.Sub
+                      ; Where: 0
+                      ; Type:
+                        mkResultTy
+                          tys.AccTy
+                          ~(Fix
+                             (x.Subst
+                               ~(Keep
+                                  ~(Insert <Where: tys.Where; Type: tys.ResultTy; Into: tys.Sub>))))
+                      >)
+                 ; Where: suc tys.Where
+                 ; AccTy: tys.AccTy
+                 ; ResultTy: tys.ResultTy
+                 >
+               in
+               let boundTys2
+                 : <Sub: ArtystTypeSubst; Where: Nat; AccTy: ArtystType; ResultTy: ArtystType> =
+                 < Sub: ~(Insert <Into: tys.Sub; Where: tys.Where; Type: tys.ResultTy>)
+                 ; Where: 0
+                 ; AccTy: tys.AccTy
+                 ; ResultTy: ~(Fix finalResTy)
+                 >
+               in
+               \rec ~>
+                 ~(Abs
+                    (\acc ~>
+                      phase1LetAll
+                        [ (x.Terms boundTys1 <Components: `acc; Shape: `rec>).Components
+                        ; \acc2 ~> (x.Terms boundTys1 <Components: `acc; Shape: `rec>).Shape
+                        ; \acc2, shape2 ~>
+                            (x.Terms boundTys2 <Components: `acc2; Shape: `shape2>).Components
+                        ; \acc2, shape2, acc3 ~>
+                            (x.Terms boundTys2 <Components: `acc2; Shape: `shape2>).Shape
+                        ]
+                        (\acc2, shape2, acc3, shape3 ~>
+                          ~(Tuple
+                             [ <Type: ~(L tys.AccTy); Val: `acc3>
+                             ; < Type: ~(Fix finalResTy)
+                               ; Val:
+                                 roll2
+                                   ~(Insert <Into: tys.Sub; Where: tys.Where; Type: tys.ResultTy>)
+                                   `shape3
+                               >
+                             ]))))
+             >)
+        in
+        let applied : Phase1Term =
+          ~(App <Fun: fixHelper; Arg: terms.Components>)
+        in
+        < Components:
+          ~(Project <Target: applied; Types: [~(L tys.AccTy); ~(Fix finalResTy)]; Which: 0>)
+        ; Shape: ~(Project <Target: applied; Types: [~(L tys.AccTy); ~(Fix finalResTy)]; Which: 1>)
+        >
+      >
+    }
+in
+let phase1 (t : ArtystTerm) : Phase1Term =
+  -- Translate terms according to phase 1.
+  foldcase t by
+    { Var x => ~(Var x)
+    ; Zero u => ~(Zero u)
+    ; Suc t => ~(Suc t)
+    ; Rec t => ~(Rec t)
+    ; Abs t => ~(Abs t)
+    ; App t => ~(App t)
+    ; Let t => ~(Let t)
+    ; UnrollNat t => ~(UnrollNat t)
+    ; Tuple t => ~(Tuple t)
+    ; Project t => ~(Project t)
+    ; Inject t => ~(Inject t)
+    ; Match t => ~(Match t)
+    ; Nil ty => ~(Nil ty)
+    ; Cons t => ~(Cons t)
+    ; UnrollList t => ~(UnrollList t)
+    ; FoldList t => ~(FoldList t)
+    ; Roll t =>
+      let distrib =
+        distribute t.Type
+      in
+      let tyNat =
+        distrib.Subst ~(Insert <Into: ~(Done <>); Where: 0; Type: ~(N <>)>)
+      in
+      let terms =
+        distrib.Terms
+          <Sub: ~(Done <>); Where: 0; AccTy: ~(Fix t.Type); ResultTy: ~(N <>)>
+          < Components: ~(Nil tyNat)
+          ; Shape:
+            distrib.Map
+              < Sub: ~(Done <>)
+              ; Where: 0
+              ; DomTy: ~(Fix t.Type)
+              ; CodTy:
+                ~(Arrow <Dom: ~(L ~(Fix t.Type)); Cod: ~(Prod [~(L ~(Fix t.Type)); ~(N <>)])>)
+              >
+              <Target: t.Val; Function: singleton ~(Fix t.Type)>
+          >
+      in
+      ~(Roll2 <Type: t.Type; Shape: terms.Shape; Components: terms.Components>)
+    ; Unroll t => ~(Unroll t)
+    ; Fold t => ~(Fold t)
+    }
+in
+let Phase2Type =
+  data Ty [N: <>; Arrow: <Dom: Ty; Cod: Ty>; Prod: List Ty; Sum: List Ty; L: Ty]
+in
+let Phase2Term =
+  -- Terms after phase 2.
+  data Term
+    [ Var: Nat
+    ; Zero: <>
+    ; Suc: Term
+    ; Rec: <Target: Term; Zero: Term; Suc: Term>
+    ; Abs: Term
+    ; App: <Fun: Term; Arg: Term>
+    ; Let: <Bound: Term; Body: Term>
+    ; Arb: Phase2Type
+    ; Tuple: List <Type: Phase2Type; Val: Term>
+    ; Project: <Target: Term; Types: List Phase2Type; Which: Nat>
+    ; Inject: <Types: List Phase2Type; Which: Nat; Val: Term>
+    ; Match: <Return: Phase2Type; Target: Term; Cases: List <Type: Phase2Type; Body: Term>>
+    ; UnrollNat: Term
+    ; Nil: Phase2Type
+    ; Cons: <Type: Phase2Type; Head: Term; Tail: Term>
+    ; Snoc: <Type: Phase2Type; Tail: Term; Head: Term>
+    ; Length: <Type: Phase2Type; Target: Term>
+    ; Index: <Type: Phase2Type; Target: Term; Index: Term>
+    ; UnrollList: <Type: Phase2Type; Target: Term>
+    ; FoldList: <TypeFrom: Phase2Type; TypeTo: Phase2Type; Target: Term; Nil: Term; Cons: Term>
+    ; Max: <Type: Phase2Type; Body: Term; Target: Term>
+    ]
+in
+let Phase2Subst =
+  List Phase2Type
+in
+let renamePhase2 (ty : Phase2Term) : (Nat -> Nat) -> Phase2Term =
+  foldcase ty by
+    { Var n => \f => ~(Var (f n))
+    ; Zero u => \f => ~(Zero u)
+    ; Suc x => \f => ~(Suc (x f))
+    ; Rec x => \f => ~(Rec <Target: x.Target f; Zero: x.Zero f; Suc: x.Suc (shift f)>)
+    ; Abs x => \f => ~(Abs (x (shift f)))
+    ; App x => \f => ~(App <Fun: x.Fun f; Arg: x.Arg f>)
+    ; Let x => \f => ~(Let <Bound: x.Bound f; Body: x.Body (shift f)>)
+    ; Arb x => \f => ~(Arb x)
+    ; Tuple x => \f =>
+      ~(Tuple
+         (map
+           (\X => List <Type: Phase2Type; Val: X>)
+           ((Nat -> Nat) -> Phase2Term)
+           Phase2Term
+           (\x => x f)
+           x))
+    ; Project x => \f => ~(Project <Target: x.Target f; Types: x.Types; Which: x.Which>)
+    ; Inject x => \f => ~(Inject <Types: x.Types; Which: x.Which; Val: x.Val f>)
+    ; Match x => \f =>
+      ~(Match
+         < Return: x.Return
+         ; Target: x.Target f
+         ; Cases:
+           map
+             (\X => List <Type: Phase2Type; Body: X>)
+             ((Nat -> Nat) -> Phase2Term)
+             Phase2Term
+             (\x => x (shift f))
+             x.Cases
+         >)
+    ; UnrollNat x => \f => ~(UnrollNat (x f))
+    ; Nil x => \f => ~(Nil x)
+    ; Cons x => \f => ~(Cons <Type: x.Type; Head: x.Head f; Tail: x.Tail f>)
+    ; Snoc x => \f => ~(Snoc <Type: x.Type; Head: x.Head f; Tail: x.Tail f>)
+    ; Length x => \f => ~(Length <Type: x.Type; Target: x.Target f>)
+    ; Index x => \f => ~(Index <Type: x.Type; Target: x.Target f; Index: x.Index f>)
+    ; Max x => \f => ~(Max <Type: x.Type; Body: x.Body (shift f); Target: x.Target f>)
+    ; UnrollList x => \f => ~(UnrollList <Type: x.Type; Target: x.Target f>)
+    ; FoldList x => \f =>
+      ~(FoldList
+         < TypeFrom: x.TypeFrom
+         ; TypeTo: x.TypeTo
+         ; Target: x.Target f
+         ; Nil: x.Nil f
+         ; Cons: x.Cons (shift f)
+         >)
+    }
+in
+let MapTy =
+  < Subst: Phase2Subst -> Phase2Type
+  ; Map:
+    <Sub: Phase2Subst; Where: Nat; DomTy: Phase2Type; CodTy: Phase2Type> ->
+    <Target: Phase2Term; Function: Phase2Term> ->
+    Phase2Term
+  >
+in
+let insertAt (n : Nat) (ty : Phase2Type) : Phase2Subst -> Phase2Subst =
+  foldcase n by
+    { Z u => \sub => cons ty sub
+    ; S n => \sub => case !sub of {N u => [ty]; C x => cons x.H (n x.T)}
+    }
+in
+let mapPhase2 (ty : ArtystType) : MapTy =
+  -- A ->
+  -- < Subst σ = A [ σ ]
+  -- ; Map:
+  --   <σ; B; C> ->
+  --   < Fun: Term Γ (B -> C)
+  --   ; Target: Term Γ (A [ σ || X / B ])
+  --   > ->
+  --   Term Γ (A [ σ || X / C ])>
+  foldcase ty by
+    { Var n =>
+      < Subst: \sub =>
+        let index : Nat -> Phase2Type =
+          foldcase sub by {N u => \n => ~(N u); C x => \n => case !n of {Z u => x.H; S n => x.T n}}
+        in
+        index n
+      ; Map: \tys, terms =>
+        case compare tys.Where n of
+          { LT u => terms.Target
+          ; EQ u => ~(App <Fun: terms.Function; Arg: terms.Target>)
+          ; GT u => terms.Target
+          }
+      >
+    ; N u => <Subst: \sub => ~(N u); Map: \tys, terms => terms.Target>
+    ; Arrow x =>
+      let orig : Phase2Type =
+        ~(Arrow <Dom: x.Dom.Subst []; Cod: x.Cod.Subst []>)
+      in
+      <Subst: \sub => orig; Map: \tys, terms => terms.Target>
+    ; Prod x =>
+      < Subst: \sub => ~(Prod (map (\X => List X) MapTy Phase2Type (\x => x.Subst sub) x))
+      ; Map: \tys, terms =>
+        let prodHelper : (Nat -> Phase2Term) -> List <Type: Phase2Type; Val: Phase2Term> =
+          foldcase x by
+            { N u => \project => []
+            ; C x => \project =>
+              cons
+                < Type: x.H.Subst (insertAt tys.Where tys.CodTy tys.Sub)
+                ; Val: x.H.Map tys <Function: terms.Function; Target: project 0>
+                >
+                (x.T (\k => project (suc k)))
+            }
+        in
+        ~(Tuple
+           (prodHelper
+             (\n =>
+               ~(Project
+                  < Target: terms.Target
+                  ; Which: n
+                  ; Types:
+                    map
+                      (\X => List X)
+                      MapTy
+                      Phase2Type
+                      (\x => x.Subst (insertAt tys.Where tys.DomTy tys.Sub))
+                      x
+                  >))))
+      >
+    ; Sum x =>
+      < Subst: \sub => ~(Sum (map (\X => List X) MapTy Phase2Type (\x => x.Subst sub) x))
+      ; Map: \tys, terms =>
+        let wknFunction =
+          renamePhase2 terms.Function (drop 1)
+        in
+        let sumHelper
+          : (Nat -> Phase2Term -> Phase2Term) -> List <Type: Phase2Type; Body: Phase2Term> =
+          foldcase x by
+            { N u => \inject => []
+            ; C x => \inject =>
+              cons
+                < Type: x.H.Subst (insertAt tys.Where tys.DomTy tys.Sub)
+                ; Body: \target ~> x.H.Map tys <Target: `target; Function: wknFunction>
+                >
+                (x.T (\k => inject (suc k)))
+            }
+        in
+        let tys =
+          map
+            (\X => List X)
+            MapTy
+            Phase2Type
+            (\x => x.Subst (insertAt tys.Where tys.CodTy tys.Sub))
+            x
+        in
+        ~(Match
+           < Return: ~(Sum tys)
+           ; Target: terms.Target
+           ; Cases: sumHelper (\n, t => ~(Inject <Which: n; Val: t; Types: tys>))
+           >)
+      >
+    ; L x =>
+      < Subst: \sub => ~(L (x.Subst sub))
+      ; Map: \tys, terms =>
+        let wknFunction =
+          renamePhase2 terms.Function (drop 1)
+        in
+        let domTy =
+          x.Subst (insertAt tys.Where tys.DomTy tys.Sub)
+        in
+        let codTy =
+          x.Subst (insertAt tys.Where tys.CodTy tys.Sub)
+        in
+        ~(FoldList
+           < TypeFrom: domTy
+           ; TypeTo: ~(L codTy)
+           ; Target: terms.Target
+           ; Nil: ~(Nil codTy)
+           ; Cons:
+             let comment =
+               -- Term (Γ, <A [ σ || X / B ], List (A [ σ || X / C ])>) (List (A [ σ || X / C ]))
+               <>
+             in
+             \rec ~>
+               ~(Cons
+                  < Type: codTy
+                  ; Head:
+                    x.Map
+                      tys
+                      < Target: ~(Project <Target: `rec; Types: [domTy; ~(L codTy)]; Which: 0>)
+                      ; Function: wknFunction
+                      >
+                  ; Tail: ~(Project <Target: `rec; Types: [domTy; ~(L codTy)]; Which: 1>)
+                  >)
+           >)
+      >
+    ; Fix x =>
+      < Subst: \sub =>
+        ~(Prod [~(N <>); ~(Arrow <Dom: ~(L ~(N <>)); Cod: x.Subst (cons ~(N <>) sub)>)])
+      ; Map: \tys, terms =>
+        let project (n : Nat) : Phase2Term =
+          ~(Project
+             < Types:
+               [ ~(Arrow
+                    < Dom: ~(L ~(N <>))
+                    ; Cod: x.Subst (insertAt (suc tys.Where) tys.DomTy (cons ~(N <>) tys.Sub))
+                    >)
+               ]
+             ; Target: terms.Target
+             ; Which: n
+             >)
+        in
+        ~(Tuple
+           [ <Type: ~(N <>); Val: project 0>
+           ; < Type:
+               ~(Arrow
+                  < Dom: ~(L ~(N <>))
+                  ; Cod: x.Subst (insertAt (suc tys.Where) tys.CodTy (cons ~(N <>) tys.Sub))
+                  >)
+             ; Val:
+               ~(Abs
+                  (x.Map
+                    < Sub: cons ~(N <>) tys.Sub
+                    ; Where: suc tys.Where
+                    ; DomTy: tys.DomTy
+                    ; CodTy: tys.CodTy
+                    >
+                    < Function: renamePhase2 terms.Function (drop 1)
+                    ; Target: renamePhase2 (project 1) (drop 1)
+                    >))
+             >
+           ])
+      >
+    }
+in
+let substTy (ty : ArtystType) (sub : Phase2Subst) : Phase2Type =
+  (mapPhase2 ty).Subst sub
+in
+let phase2 (t : Phase1Term) : Phase2Term =
+  foldcase t by
+    { Var n => ~(Var n)
+    ; Zero u => ~(Zero u)
+    ; Suc t => ~(Suc t)
+    ; Rec x => ~(Rec x)
+    ; Abs t => ~(Abs t)
+    ; App x => ~(App x)
+    ; Let x => ~(Let x)
+    ; UnrollNat t => ~(UnrollNat t)
+    ; Tuple x =>
+      ~(Tuple
+         (map
+           (\X => List <Type: X; Val: Phase2Term>)
+           ArtystType
+           Phase2Type
+           (\ty => substTy ty [])
+           x))
+    ; Project x =>
+      ~(Project
+         < Types: map (\X => List X) ArtystType Phase2Type (\ty => substTy ty []) x.Types
+         ; Which: x.Which
+         ; Target: x.Target
+         >)
+    ; Inject x =>
+      ~(Inject
+         < Types: map (\X => List X) ArtystType Phase2Type (\ty => substTy ty []) x.Types
+         ; Which: x.Which
+         ; Val: x.Val
+         >)
+    ; Match x =>
+      ~(Match
+         (map
+           (\X => <Return: X; Target: Phase2Term; Cases: List <Type: X; Body: Phase2Term>>)
+           ArtystType
+           Phase2Type
+           (\ty => substTy ty [])
+           x))
+    ; Nil ty => ~(Nil (substTy ty []))
+    ; Cons x => ~(Cons <Type: substTy x.Type []; Head: x.Head; Tail: x.Tail>)
+    ; Snoc x => ~(Snoc <Type: substTy x.Type []; Head: x.Head; Tail: x.Tail>)
+    ; Length x => ~(Length <Type: substTy x.Type []; Target: x.Target>)
+    ; UnrollList x => ~(UnrollList <Type: substTy x.Type []; Target: x.Target>)
+    ; FoldList x =>
+      ~(FoldList
+         (map
+           (\X => <TypeFrom: X; TypeTo: X; Target: Phase2Term; Nil: Phase2Term; Cons: Phase2Term>)
+           ArtystType
+           Phase2Type
+           (\ty => substTy ty [])
+           x))
+    ; Roll2 x =>
+      let comment =
+        -- x.Type = A [X/X]
+        -- x.Shape : Term Γ (A [X/Nat])
+        -- x.Components : Term Γ (List <Nat; List Nat -> A [X/Nat]>)
+        ----
+        -- Term Γ <Nat; List Nat -> A [X/Nat]>
+        <>
+      in
+      let fixTy =
+        substTy ~(Fix x.Type) []
+      in
+      let natTy =
+        substTy x.Type [~(N <>)]
+      in
+      ~(Tuple
+         [ < Type: ~(L ~(N <>))
+           ; Val:
+             ~(Suc
+                ~(Max
+                   < Type: fixTy
+                   ; Body: \x ~>
+                     ~(Project
+                        < Types: [~(N <>); ~(Arrow <Dom: ~(L ~(N <>)); Cod: natTy>)]
+                        ; Which: 0
+                        ; Target: `x
+                        >)
+                   ; Target: x.Components
+                   >))
+           >
+         ; < Type: ~(Arrow <Dom: ~(L ~(N <>)); Cod: natTy>)
+           ; Val:
+             ~(Abs
+                (\idx ~>
+                  ~(Match
+                     < Return: natTy
+                     ; Target: ~(UnrollList <Type: ~(N <>); Target: `idx>)
+                     ; Cases:
+                       [ <Type: ~(Prod []); Body: renamePhase2 x.Shape (drop 2)>
+                       ; < Type: ~(Prod [~(N <>); ~(L ~(N <>))])
+                         ; Body: \pair ~>
+                           let which : Phase2Term =
+                             ~(Project <Types: [~(N <>); ~(L ~(N <>))]; Which: 0; Target: `pair>)
+                           in
+                           let path : Phase2Term =
+                             ~(Project <Types: [~(N <>); ~(L ~(N <>))]; Which: 1; Target: `pair>)
+                           in
+                           let child : Phase2Term =
+                             ~(Index
+                                < Type: fixTy
+                                ; Target: renamePhase2 x.Components (drop 2)
+                                ; Index: which
+                                >)
+                           in
+                           let lookup : Phase2Term =
+                             ~(Project
+                                < Types: [~(N <>); ~(Arrow <Dom: ~(L ~(N <>)); Cod: natTy>)]
+                                ; Which: 1
+                                ; Target: child
+                                >)
+                           in
+                           ~(App <Fun: lookup; Arg: path>)
+                         >
+                       ]
+                     >)))
+           >
+         ])
+    ; Unroll x =>
+      let comment =
+        -- x.Type = A [X/X]
+        -- x.Target : Term Γ (<Nat; List Nat -> A [X/Nat]>)
+        ----
+        -- Term Γ (A [X/<Nat; List Nat -> A [X/Nat]>])
+        <>
+      in
+      let mapped =
+        mapPhase2 x.Type
+      in
+      let natTy =
+        mapped.Subst [~(N <>)]
+      in
+      ~(Let
+         < Bound: x.Target
+         ; Body: \target ~>
+           let depth : Phase2Term =
+             -- Nat
+             ~(Project
+                < Types: [~(N <>); ~(Arrow <Dom: ~(L ~(N <>)); Cod: natTy>)]
+                ; Which: 0
+                ; Target: `target
+                >)
+           in
+           let index : Phase2Term =
+             -- List Nat -> A [X/Nat]
+             ~(Project
+                < Types: [~(N <>); ~(Arrow <Dom: ~(L ~(N <>)); Cod: natTy>)]
+                ; Which: 1
+                ; Target: `target
+                >)
+           in
+           let update : Phase2Term =
+             -- Nat -> <Nat; List Nat -> A [X/Nat]>
+             ~(Abs
+                (\n ~>
+                  ~(Tuple
+                     [ <Type: ~(N <>); Val: renamePhase2 depth (drop 1)>
+                     ; < Type: ~(Arrow <Dom: ~(L ~(N <>)); Cod: natTy>)
+                       ; Val:
+                         ~(Abs
+                            (\ns ~>
+                              ~(App
+                                 < Fun: renamePhase2 index (drop 2)
+                                 ; Arg: ~(Cons <Type: ~(N <>); Head: `n; Tail: `ns>)
+                                 >)))
+                       >
+                     ])))
+           in
+           let root : Phase2Term =
+             -- A [X/Nat]
+             ~(App <Fun: index; Arg: ~(Nil ~(N <>))>)
+           in
+           mapped.Map
+             <Sub: []; Where: 0; DomTy: ~(N <>); CodTy: substTy ~(Fix x.Type) []>
+             <Function: update; Target: root>
+         >)
+    ; Fold x =>
+      let comment =
+        -- x.TypeFrom = A [X/X]
+        -- x.TypeTo = B
+        -- x.Target: Term Γ (<Nat; List Nat -> A [X/Nat]>)
+        -- x.Body: Term (Γ, A [X/B]) B
+        ----
+        -- Term Γ B
+        <>
+      in
+      ~(Let
+         < Bound: x.Target
+         ; Body: \target ~>
+           let codTy =
+             substTy x.TypeTo []
+           in
+           let mapped =
+             mapPhase2 x.TypeFrom
+           in
+           let depth : Phase2Term =
+             -- Term (Γ, _) Nat
+             ~(Project
+                < Types: [~(N <>); ~(Arrow <Dom: ~(L ~(N <>)); Cod: mapped.Subst [~(N <>)]>)]
+                ; Which: 0
+                ; Target: `target
+                >)
+           in
+           let index : Phase2Term =
+             -- Term (Γ, _) (List Nat -> A [X/Nat])
+             ~(Project
+                < Types: [~(N <>); ~(Arrow <Dom: ~(L ~(N <>)); Cod: mapped.Subst [~(N <>)]>)]
+                ; Which: 1
+                ; Target: `target
+                >)
+           in
+           let body =
+             -- Term (Γ, _) (A [X/B] -> B)
+             renamePhase2 ~(Abs x.Body) (drop 1)
+           in
+           let heap : Phase2Term =
+             -- Term (Γ, _) (List Nat -> B)
+             ~(Rec
+                < Target: depth
+                ; Zero: ~(Abs ~(Arb codTy))
+                ; Suc: \rec ~>
+                  ~(Abs
+                     (\idx ~>
+                       let comment =
+                         -- rec : List Nat -> B
+                         -- idx : List Nat
+                         ----
+                         -- B
+                         <>
+                       in
+                       let shape : Phase2Term =
+                         -- A [X/Nat]
+                         ~(App <Fun: renamePhase2 index (drop 2); Arg: `idx>)
+                       in
+                       let update : Phase2Term =
+                         -- Nat -> B
+                         ~(Abs
+                            (\pos ~>
+                              ~(App
+                                 < Fun: `rec
+                                 ; Arg: ~(Snoc <Type: ~(N <>); Head: `idx; Tail: `pos>)
+                                 >)))
+                       in
+                       let arg =
+                         -- A [X/B]
+                         mapped.Map
+                           <Sub: []; Where: 0; DomTy: ~(N <>); CodTy: codTy>
+                           <Function: update; Target: shape>
+                       in
+                       ~(App <Fun: renamePhase2 body (drop 2); Arg: arg>)))
+                >)
+           in
+           ~(App <Fun: heap; Arg: ~(Nil ~(N <>))>)
+         >)
+    }
+in
+let Phase3Type =
+  data Ty [N: <>; Arrow: <Dom: Ty; Cod: Ty>; Prod: List Ty; Sum: List Ty]
+in
+let Phase3Term =
+  -- Terms after phase 3.
+  data Term
+    [ Var: Nat
+    ; Zero: <>
+    ; Suc: Term
+    ; Rec: <Target: Term; Zero: Term; Suc: Term>
+    ; Abs: Term
+    ; App: <Fun: Term; Arg: Term>
+    ; Let: <Bound: Term; Body: Term>
+    ; Arb: Phase3Type
+    ; Max: <Left: Term; Right: Term>
+    ; IfEqual: <Left: Term; Right: Term; True: Term; False: Term>
+    ; Tuple: List <Type: Phase3Type; Val: Term>
+    ; Project: <Target: Term; Types: List Phase3Type; Which: Nat>
+    ; Inject: <Types: List Phase3Type; Which: Nat; Val: Term>
+    ; Match: <Return: Phase3Type; Target: Term; Cases: List <Type: Phase3Type; Body: Term>>
+    ; UnrollNat: Term
+    ]
+in
+let renamePhase3 (ty : Phase3Term) : (Nat -> Nat) -> Phase3Term =
+  foldcase ty by
+    { Var n => \f => ~(Var (f n))
+    ; Zero u => \f => ~(Zero u)
+    ; Suc x => \f => ~(Suc (x f))
+    ; Rec x => \f => ~(Rec <Target: x.Target f; Zero: x.Zero f; Suc: x.Suc (shift f)>)
+    ; Abs x => \f => ~(Abs (x (shift f)))
+    ; App x => \f => ~(App <Fun: x.Fun f; Arg: x.Arg f>)
+    ; Let x => \f => ~(Let <Bound: x.Bound f; Body: x.Body (shift f)>)
+    ; Arb x => \f => ~(Arb x)
+    ; Max x => \f => ~(Max <Left: x.Left f; Right: x.Right f>)
+    ; IfEqual x => \f =>
+      ~(IfEqual <Left: x.Left f; Right: x.Right f; True: x.True f; False: x.False f>)
+    ; Tuple x => \f =>
+      ~(Tuple
+         (map
+           (\X => List <Type: Phase3Type; Val: X>)
+           ((Nat -> Nat) -> Phase3Term)
+           Phase3Term
+           (\x => x f)
+           x))
+    ; Project x => \f => ~(Project <Target: x.Target f; Types: x.Types; Which: x.Which>)
+    ; Inject x => \f => ~(Inject <Types: x.Types; Which: x.Which; Val: x.Val f>)
+    ; Match x => \f =>
+      ~(Match
+         < Return: x.Return
+         ; Target: x.Target f
+         ; Cases:
+           map
+             (\X => List <Type: Phase3Type; Body: X>)
+             ((Nat -> Nat) -> Phase3Term)
+             Phase3Term
+             (\x => x (shift f))
+             x.Cases
+         >)
+    ; UnrollNat x => \f => ~(UnrollNat (x f))
+    }
+in
+let phase3Ty (ty : Phase2Type) : Phase3Type =
+  foldcase ty by
+    { N u => ~(N u)
+    ; Arrow x => ~(Arrow x)
+    ; Prod x => ~(Prod x)
+    ; Sum x => ~(Sum x)
+    ; L ty => ~(Prod [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: ty>)])
+    }
+in
+let phase3 (t : Phase2Term) : Phase3Term =
+  foldcase t by
+    { Var x => ~(Var x)
+    ; Zero x => ~(Zero x)
+    ; Suc x => ~(Suc x)
+    ; Rec x => ~(Rec x)
+    ; Abs x => ~(Abs x)
+    ; App x => ~(App x)
+    ; Let x => ~(Let x)
+    ; Arb ty => ~(Arb (phase3Ty ty))
+    ; Tuple x =>
+      ~(Tuple (map (\X => List <Type: X; Val: Phase3Term>) Phase2Type Phase3Type phase3Ty x))
+    ; Project x =>
+      ~(Project
+         (map
+           (\X => <Types: List X; Which: Nat; Target: Phase3Term>)
+           Phase2Type
+           Phase3Type
+           phase3Ty
+           x))
+    ; Inject x =>
+      ~(Inject
+         (map
+           (\X => <Types: List X; Which: Nat; Val: Phase3Term>)
+           Phase2Type
+           Phase3Type
+           phase3Ty
+           x))
+    ; Match x =>
+      ~(Match
+         (map
+           (\X => <Return: X; Target: Phase3Term; Cases: List <Type: X; Body: Phase3Term>>)
+           Phase2Type
+           Phase3Type
+           phase3Ty
+           x))
+    ; UnrollNat x => ~(UnrollNat x)
+    ; Nil ty =>
+      let ty =
+        phase3Ty ty
+      in
+      ~(Tuple
+         [ <Type: ~(N <>); Val: ~(Zero <>)>
+         ; <Type: ~(Arrow <Dom: ~(N <>); Cod: ty>); Val: ~(Abs ~(Arb ty))>
+         ])
+    ; Cons x =>
+      let ty =
+        phase3Ty x.Type
+      in
+      let len : Phase3Term =
+        ~(Project <Target: x.Tail; Types: [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: ty>)]; Which: 0>)
+      in
+      let idx : Phase3Term =
+        ~(Project <Target: x.Tail; Types: [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: ty>)]; Which: 1>)
+      in
+      ~(Tuple
+         [ <Type: ~(N <>); Val: ~(Suc len)>
+         ; < Type: ~(Arrow <Dom: ~(N <>); Cod: ty>)
+           ; Val:
+             ~(Abs
+                (\n ~>
+                  ~(Match
+                     < Return: ty
+                     ; Target: ~(UnrollNat `n)
+                     ; Cases:
+                       [ <Type: ~(Prod []); Body: renamePhase3 x.Head (drop 2)>
+                       ; < Type: ~(N <>)
+                         ; Body: \n ~> ~(App <Fun: renamePhase3 idx (drop 2); Arg: `n>)
+                         >
+                       ]
+                     >)))
+           >
+         ])
+    ; Snoc x =>
+      let ty =
+        phase3Ty x.Type
+      in
+      let len : Phase3Term =
+        ~(Project <Target: x.Head; Types: [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: ty>)]; Which: 0>)
+      in
+      let idx : Phase3Term =
+        ~(Project <Target: x.Head; Types: [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: ty>)]; Which: 1>)
+      in
+      ~(Tuple
+         [ <Type: ~(N <>); Val: ~(Suc len)>
+         ; < Type: ~(Arrow <Dom: ~(N <>); Cod: ty>)
+           ; Val:
+             ~(Abs
+                (\n ~>
+                  ~(IfEqual
+                     < Left: `n
+                     ; Right: renamePhase3 len (drop 1)
+                     ; True: renamePhase3 x.Tail (drop 1)
+                     ; False: ~(App <Fun: renamePhase3 idx (drop 1); Arg: `n>)
+                     >)))
+           >
+         ])
+    ; Length x =>
+      ~(Project
+         < Target: x.Target
+         ; Types: [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: phase3Ty x.Type>)]
+         ; Which: 0
+         >)
+    ; Index x =>
+      ~(App
+         < Fun:
+           ~(Project
+              < Target: x.Target
+              ; Types: [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: phase3Ty x.Type>)]
+              ; Which: 1
+              >)
+         ; Arg: x.Index
+         >)
+    ; UnrollList x =>
+      let ty =
+        phase3Ty x.Type
+      in
+      let len : Phase3Term =
+        ~(Project <Target: x.Target; Types: [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: ty>)]; Which: 0>)
+      in
+      let idx : Phase3Term =
+        ~(Project <Target: x.Target; Types: [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: ty>)]; Which: 1>)
+      in
+      ~(Match
+         < Return:
+           ~(Sum [~(Prod []); ~(Prod [ty; ~(Prod [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: ty>)])])])
+         ; Target: ~(UnrollNat len)
+         ; Cases:
+           [ < Type: ~(Prod [])
+             ; Body: \u ~>
+               ~(Inject
+                  < Types:
+                    [~(Prod []); ~(Prod [ty; ~(Prod [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: ty>)])])]
+                  ; Which: 0
+                  ; Val: ~(Tuple [])
+                  >)
+             >
+           ; < Type: ~(N <>)
+             ; Body: \n ~>
+               ~(Inject
+                  < Types:
+                    [~(Prod []); ~(Prod [ty; ~(Prod [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: ty>)])])]
+                  ; Which: 1
+                  ; Val:
+                    ~(Tuple
+                       [ <Type: ty; Val: ~(App <Fun: renamePhase3 idx (drop 1); Arg: ~(Zero <>)>)>
+                       ; < Type: ~(Prod [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: ty>)])
+                         ; Val:
+                           ~(Tuple
+                              [ <Type: ~(N <>); Val: `n>
+                              ; < Type: ~(Arrow <Dom: ~(N <>); Cod: ty>)
+                                ; Val:
+                                  ~(Abs
+                                     (\k ~>
+                                       ~(App <Fun: renamePhase3 idx (drop 2); Arg: ~(Suc `k)>)))
+                                >
+                              ])
+                         >
+                       ])
+                  >)
+             >
+           ]
+         >)
+    ; FoldList x =>
+      let comment =
+        -- x.TypeFrom = A
+        -- x.TypeTo = B
+        -- x.Target: <Nat; Nat -> A>
+        -- x.Nil: B
+        -- x.Cons: <A; B> |- B
+        ----
+        -- B
+        <>
+      in
+      let bodyFun : Phase3Term =
+        ~(Abs x.Cons)
+      in
+      ~(Let
+         < Bound: x.Target
+         ; Body: \target ~>
+           let helper : Phase3Term =
+             -- (Nat -> A) -> B
+             ~(Rec
+                < Target:
+                  ~(Project
+                     < Target: `target
+                     ; Types: [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: phase3Ty x.TypeFrom>)]
+                     ; Which: 0
+                     >)
+                ; Zero: ~(Abs (\idx ~> renamePhase3 x.Nil (drop 2)))
+                ; Suc: \rec ~>
+                  ~(Abs
+                     (\idx ~>
+                       ~(App
+                          < Fun: renamePhase3 bodyFun (drop 3)
+                          ; Arg:
+                            ~(Tuple
+                               [ < Type: phase3Ty x.TypeFrom
+                                 ; Val: ~(App <Fun: `idx; Arg: ~(Zero <>)>)
+                                 >
+                               ; < Type: phase3Ty x.TypeTo
+                                 ; Val:
+                                   ~(App
+                                      < Fun: `rec
+                                      ; Arg: ~(Abs (\x ~> ~(App <Fun: `idx; Arg: ~(Suc `x)>)))
+                                      >)
+                                 >
+                               ])
+                          >)))
+                >)
+           in
+           ~(App
+              < Fun: helper
+              ; Arg:
+                ~(Project
+                   < Target: `target
+                   ; Types: [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: phase3Ty x.TypeFrom>)]
+                   ; Which: 1
+                   >)
+              >)
+         >)
+    ; Max x =>
+      let comment =
+        -- x.Type = A
+        -- x.Body: A |- Nat
+        -- x.Target: <Nat; Nat -> A>
+        ----
+        -- Nat
+        <>
+      in
+      let bodyFun : Phase3Term =
+        ~(Abs x.Body)
+      in
+      ~(Let
+         < Bound: x.Target
+         ; Body: \target ~>
+           let helper : Phase3Term =
+             -- (Nat -> A) -> Nat
+             ~(Rec
+                < Target:
+                  ~(Project
+                     < Target: `target
+                     ; Types: [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: phase3Ty x.Type>)]
+                     ; Which: 0
+                     >)
+                ; Zero: ~(Abs (\idx ~> ~(Zero <>)))
+                ; Suc: \rec ~>
+                  ~(Abs
+                     (\idx ~>
+                       ~(Max
+                          < Left:
+                            ~(App
+                               < Fun: renamePhase3 bodyFun (drop 3)
+                               ; Arg: ~(App <Fun: `idx; Arg: ~(Zero <>)>)
+                               >)
+                          ; Right:
+                            ~(App
+                               <Fun: `rec; Arg: ~(Abs (\x ~> ~(App <Fun: `idx; Arg: ~(Suc `x)>)))>)
+                          >)))
+                >)
+           in
+           ~(App
+              < Fun: helper
+              ; Arg:
+                ~(Project
+                   < Target: `target
+                   ; Types: [~(N <>); ~(Arrow <Dom: ~(N <>); Cod: phase3Ty x.Type>)]
+                   ; Which: 1
+                   >)
+              >)
+         >)
+    }
+in
+let Phase4Type =
+  data Ty [N: <>; Arrow: <Dom: Ty; Cod: Ty>; Union: List Ty; Prod: List Ty]
+in
+let Phase4Term =
+  -- Terms after phase 4.
+  data Term
+    [ Var: Nat
+    ; Zero: <>
+    ; Suc: Term
+    ; Rec: <Target: Term; Zero: Term; Suc: Term>
+    ; Abs: Term
+    ; App: <Fun: Term; Arg: Term>
+    ; Let: <Bound: Term; Body: Term>
+    ; Arb: Phase4Type
+    ; Max: <Left: Term; Right: Term>
+    ; IfEqual: <Left: Term; Right: Term; True: Term; False: Term>
+    ; Case: <Type: Phase4Type; Target: Term; Cases: List Term>
+    ; Lit: Nat
+    ; Put: <Val: Term; Types: List Phase4Type; Which: Nat>
+    ; Get: <Target: Term; Types: List Phase4Type; Which: Nat>
+    ; Tuple: List <Type: Phase4Type; Val: Term>
+    ; Project: <Target: Term; Types: List Phase4Type; Which: Nat>
+    ]
+in
+let phase4Ty (ty : Phase3Type) : Phase4Type =
+  foldcase ty by
+    { N u => ~(N u)
+    ; Arrow x => ~(Arrow x)
+    ; Prod x => ~(Prod x)
+    ; Sum x => ~(Prod [~(N <>); ~(Union x)])
+    }
+in
+let phase4 (t : Phase3Term) : Phase4Term =
+  foldcase t by
+    { Var x => ~(Var x)
+    ; Zero x => ~(Zero x)
+    ; Suc x => ~(Suc x)
+    ; Rec x => ~(Rec x)
+    ; Abs x => ~(Abs x)
+    ; App x => ~(App x)
+    ; Let x => ~(Let x)
+    ; Arb ty => ~(Arb (phase4Ty ty))
+    ; Max x => ~(Max x)
+    ; IfEqual x => ~(IfEqual x)
+    ; Tuple x =>
+      ~(Tuple (map (\X => List <Type: X; Val: Phase4Term>) Phase3Type Phase4Type phase4Ty x))
+    ; Project x =>
+      ~(Project
+         (map
+           (\X => <Types: List X; Which: Nat; Target: Phase4Term>)
+           Phase3Type
+           Phase4Type
+           phase4Ty
+           x))
+    ; Inject x =>
+      let tys =
+        map (\X => List X) Phase3Type Phase4Type phase4Ty x.Types
+      in
+      ~(Tuple
+         [ <Type: ~(N <>); Val: ~(Lit x.Which)>
+         ; <Type: ~(Union tys); Val: ~(Put <Types: tys; Which: x.Which; Val: x.Val>)>
+         ])
+    ; Match x =>
+      let tys =
+        map
+          (\X => List X)
+          <Type: Phase3Type; Body: Phase4Term>
+          Phase4Type
+          (\x => phase4Ty x.Type)
+          x.Cases
+      in
+      let matchHelper : (Nat -> Phase4Term) -> List Phase4Term =
+        -- (i -> Term Γ Aᵢ) -> All (const $ Term Γ B) Aᵢ
+        foldcase x.Cases by
+          { N u => \get => []
+          ; C x => \get => cons ~(App <Fun: ~(Abs x.H.Body); Arg: get 0>) (x.T (\x => get (suc x)))
+          }
+      in
+      ~(Case
+         < Type: phase4Ty x.Return
+         ; Target: ~(Project <Target: x.Target; Which: 0; Types: [~(N <>); ~(Union tys)]>)
+         ; Cases:
+           matchHelper
+             (\i =>
+               ~(Get
+                  < Target: ~(Project <Target: x.Target; Which: 1; Types: [~(N <>); ~(Union tys)]>)
+                  ; Types: tys
+                  ; Which: i
+                  >))
+         >)
+    ; UnrollNat x =>
+      let tys : List Phase4Type =
+        [~(Prod []); ~(Prod [])]
+      in
+      ~(Rec
+         < Target: x
+         ; Zero:
+           ~(Tuple
+              [ <Type: ~(N <>); Val: ~(Zero <>)>
+              ; <Type: ~(Union tys); Val: ~(Put <Types: tys; Which: 0; Val: ~(Tuple [])>)>
+              ])
+         ; Suc: \rec ~>
+           ~(Tuple
+              [ <Type: ~(N <>); Val: ~(Suc ~(Zero <>))>
+              ; <Type: ~(Union tys); Val: ~(Put <Types: tys; Which: 1; Val: ~(Tuple [])>)>
+              ])
+         >)
+    }
+in
+let Phase5Type =
+  data Ty [N: <>; Arrow: <Dom: Ty; Cod: Ty>; Union: List Ty]
+in
+let Phase5Term =
+  -- Terms after phase 5.
+  data Term
+    [ Var: Nat
+    ; Zero: <>
+    ; Suc: Term
+    ; Rec: <Target: Term; Zero: Term; Suc: Term>
+    ; Abs: Term
+    ; App: <Fun: Term; Arg: Term>
+    ; Let: <Bound: Term; Body: Term>
+    ; Arb: Phase5Type
+    ; Max: <Left: Term; Right: Term>
+    ; IfEqual: <Left: Term; Right: Term; True: Term; False: Term>
+    ; Case: <Type: Phase5Type; Target: Term; Cases: List Term>
+    ; Lit: Nat
+    ; Put: <Val: Term; Types: List Phase5Type; Which: Nat>
+    ; Get: <Target: Term; Types: List Phase5Type; Which: Nat>
+    ]
+in
+let renamePhase5 (ty : Phase5Term) : (Nat -> Nat) -> Phase5Term =
+  foldcase ty by
+    { Var n => \f => ~(Var (f n))
+    ; Zero u => \f => ~(Zero u)
+    ; Suc x => \f => ~(Suc (x f))
+    ; Rec x => \f => ~(Rec <Target: x.Target f; Zero: x.Zero f; Suc: x.Suc (shift f)>)
+    ; Abs x => \f => ~(Abs (x (shift f)))
+    ; App x => \f => ~(App <Fun: x.Fun f; Arg: x.Arg f>)
+    ; Let x => \f => ~(Let <Bound: x.Bound f; Body: x.Body (shift f)>)
+    ; Arb x => \f => ~(Arb x)
+    ; Max x => \f => ~(Max <Left: x.Left f; Right: x.Right f>)
+    ; IfEqual x => \f =>
+      ~(IfEqual <Left: x.Left f; Right: x.Right f; True: x.True f; False: x.False f>)
+    ; Case x => \f =>
+      ~(Case
+         (map
+           (\X => <Type: Phase5Type; Target: X; Cases: List X>)
+           ((Nat -> Nat) -> Phase5Term)
+           Phase5Term
+           (\x => x f)
+           x))
+    ; Lit k => \f => ~(Lit k)
+    ; Put x => \f => ~(Put <Types: x.Types; Which: x.Which; Val: x.Val f>)
+    ; Get x => \f => ~(Get <Types: x.Types; Which: x.Which; Target: x.Target f>)
+    }
+in
+let phase5Ty (ty : Phase4Type) : Phase5Type =
+  foldcase ty by
+    { N u => ~(N u)
+    ; Arrow x => ~(Arrow x)
+    ; Union x => ~(Union x)
+    ; Prod x => ~(Arrow <Dom: ~(N <>); Cod: ~(Union x)>)
+    }
+in
+let phase5 (t : Phase4Term) : Phase5Term =
+  foldcase t by
+    { Var x => ~(Var x)
+    ; Zero x => ~(Zero x)
+    ; Suc x => ~(Suc x)
+    ; Rec x => ~(Rec x)
+    ; Abs x => ~(Abs x)
+    ; App x => ~(App x)
+    ; Let x => ~(Let x)
+    ; Arb ty => ~(Arb (phase5Ty ty))
+    ; Max x => ~(Max x)
+    ; IfEqual x => ~(IfEqual x)
+    ; Case x => ~(Case <Type: phase5Ty x.Type; Target: x.Target; Cases: x.Cases>)
+    ; Lit x => ~(Lit x)
+    ; Put x =>
+      ~(Put
+         (map
+           (\X => <Types: List X; Which: Nat; Val: Phase5Term>)
+           Phase4Type
+           Phase5Type
+           phase5Ty
+           x))
+    ; Get x =>
+      ~(Get
+         (map
+           (\X => <Types: List X; Which: Nat; Target: Phase5Term>)
+           Phase4Type
+           Phase5Type
+           phase5Ty
+           x))
+    ; Tuple x =>
+      let tys =
+        map (\X => List X) <Type: Phase4Type; Val: Phase5Term> Phase5Type (\x => phase5Ty x.Type) x
+      in
+      let tupleHelper : (Nat -> Phase5Term -> Phase5Term) -> List Phase5Term =
+        foldcase x by
+          { N u => \inject => []
+          ; C x => \inject =>
+            cons (inject 0 (renamePhase5 x.H.Val (drop 1))) (x.T (\n, t => inject (suc n) t))
+          }
+      in
+      ~(Abs
+         (\n ~>
+           ~(Case
+              < Type: ~(Union tys)
+              ; Target: `n
+              ; Cases: tupleHelper (\n, t => ~(Put <Types: tys; Which: n; Val: t>))
+              >)))
+    ; Project x =>
+      let tys =
+        map (\X => List X) Phase4Type Phase5Type phase5Ty x.Types
+      in
+      ~(Get <Types: tys; Which: x.Which; Target: ~(App <Fun: x.Target; Arg: ~(Lit x.Which)>)>)
+    }
+in
+let SystemTType =
+  data Ty (List Ty)
+in
+let Phase6Term =
+  -- Terms after phase 6.
+  data Term
+    [ Var: Nat
+    ; Zero: <>
+    ; Suc: Term
+    ; Rec: <Target: Term; Zero: Term; Suc: Term>
+    ; Abs: Term
+    ; App: <Fun: Term; Arg: Term>
+    ; Let: <Bound: Term; Body: Term>
+    ; Arb: SystemTType
+    ; Max: <Left: Term; Right: Term>
+    ; IfEqual: <Left: Term; Right: Term; True: Term; False: Term>
+    ; Case: <Type: SystemTType; Target: Term; Cases: List Term>
+    ; Lit: Nat
+    ]
+in
+let renamePhase6 (ty : Phase6Term) : (Nat -> Nat) -> Phase6Term =
+  foldcase ty by
+    { Var n => \f => ~(Var (f n))
+    ; Zero u => \f => ~(Zero u)
+    ; Suc x => \f => ~(Suc (x f))
+    ; Rec x => \f => ~(Rec <Target: x.Target f; Zero: x.Zero f; Suc: x.Suc (shift f)>)
+    ; Abs x => \f => ~(Abs (x (shift f)))
+    ; App x => \f => ~(App <Fun: x.Fun f; Arg: x.Arg f>)
+    ; Let x => \f => ~(Let <Bound: x.Bound f; Body: x.Body (shift f)>)
+    ; Arb x => \f => ~(Arb x)
+    ; Max x => \f => ~(Max <Left: x.Left f; Right: x.Right f>)
+    ; IfEqual x => \f =>
+      ~(IfEqual <Left: x.Left f; Right: x.Right f; True: x.True f; False: x.False f>)
+    ; Case x => \f =>
+      ~(Case
+         (map
+           (\X => <Type: SystemTType; Target: X; Cases: List X>)
+           ((Nat -> Nat) -> Phase6Term)
+           Phase6Term
+           (\x => x f)
+           x))
+    ; Lit k => \f => ~(Lit k)
+    }
+in
+let phase6Ty (ty : Phase5Type) : SystemTType =
+  foldcase ty by
+    { N u => ~[]
+    ; Arrow x => ~(cons x.Dom !(x.Cod))
+    ; Union tys =>
+      foldcase tys by
+        { N u => ~[]
+        ; C x => foldcase !(x.H) by {N u => x.T; C x => ~(cons x.H !(x.T))}
+        }
+    }
+in
+let phase6 (t : Phase5Term) : Phase6Term =
+  foldcase t by
+    { Var x => ~(Var x)
+    ; Zero x => ~(Zero x)
+    ; Suc x => ~(Suc x)
+    ; Rec x => ~(Rec x)
+    ; Abs x => ~(Abs x)
+    ; App x => ~(App x)
+    ; Let x => ~(Let x)
+    ; Arb ty => ~(Arb (phase6Ty ty))
+    ; Max x => ~(Max x)
+    ; IfEqual x => ~(IfEqual x)
+    ; Case x => ~(Case <Type: phase6Ty x.Type; Target: x.Target; Cases: x.Cases>)
+    ; Lit x => ~(Lit x)
+    ; Put x =>
+      let helper
+        : < Ignore: (Nat -> Phase6Term) -> Phase6Term
+          ; AtIndex: Nat -> (Nat -> Phase6Term) -> Phase6Term
+          > =
+        -- < Ignore: (|Δ| -> Term (Γ, Δ) Nat) -> Term Γ (Aᵢⱼ -> Nat)
+        -- ; AtIndex: i -> (|Δ| -> Term (Γ, Δ) (Aᵢ -> Nat)) -> Term Γ (Aⱼₖ -> Nat)
+        -- >
+        foldcase x.Types by
+          { N u => <Ignore: \t => t 0; AtIndex: \n, t => ~(Zero <>)>
+          ; C x =>
+            < Ignore:
+              foldcase !(phase6Ty x.H) by
+                { N u => x.T.Ignore
+                ; C x => \t => ~(Abs (x.T (\k => t (suc k))))
+                }
+            ; AtIndex: \n =>
+              case !n of
+                { Z u =>
+                  foldcase !(phase6Ty x.H) by
+                    { N u => x.T.Ignore
+                    ; C x => \t => ~(Abs (x.T (\k => ~(App <Fun: t (suc k); Arg: ~(Var k)>))))
+                    }
+                ; S n =>
+                  foldcase !(phase6Ty x.H) by
+                    { N u => x.T.AtIndex n
+                    ; C x => \t => ~(Abs (x.T (\k => t (suc k))))
+                    }
+                }
+            >
+          }
+      in
+      helper.AtIndex x.Which (\n => renamePhase6 x.Val (drop n))
+    ; Get x =>
+      let helper
+        : <Ignore: Phase6Term -> Phase6Term; AtIndex: Nat -> (Nat -> Phase6Term) -> Phase6Term> =
+        -- < Ignore: Term Γ (Aᵢⱼ -> Nat) -> Term Γ Nat
+        -- ; AtIndex: i -> (|Δ| -> Term (Γ, Δ) (Aⱼₖ -> Nat)) -> Term Γ (Aᵢ -> Nat)
+        -- >
+        foldcase x.Types by
+          { N u => <Ignore: \t => t; AtIndex: \n, t => ~(Zero <>)>
+          ; C x =>
+            < Ignore:
+              foldcase !(phase6Ty x.H) by
+                { N u => x.T.Ignore
+                ; C x => \t => x.T ~(App <Fun: t; Arg: ~(Arb x.H)>)
+                }
+            ; AtIndex: \n =>
+              case !n of
+                { Z u =>
+                  foldcase !(phase6Ty x.H) by
+                    { N u => \t => x.T.Ignore (t 0)
+                    ; C x => \t => ~(Abs (x.T (\k => ~(App <Fun: t (suc k); Arg: ~(Var k)>))))
+                    }
+                ; S n =>
+                  foldcase !(phase6Ty x.H) by
+                    { N u => x.T.AtIndex n
+                    ; C x => \t => x.T (\k => ~(App <Fun: t k; Arg: ~(Arb x.H)>))
+                    }
+                }
+            >
+          }
+      in
+      helper.AtIndex x.Which (\n => renamePhase6 x.Target (drop n))
+    }
+in
+let SystemTTerm =
+  -- System T terms.
+  data Term
+    [ Var: Nat
+    ; Zero: <>
+    ; Suc: Term
+    ; Rec: <Target: Term; Zero: Term; Suc: Term>
+    ; Abs: Term
+    ; App: <Fun: Term; Arg: Term>
+    ]
+in
+let renameSystemT (t : SystemTTerm) : (Nat -> Nat) -> SystemTTerm =
+  foldcase t by
+    { Var n => \f => ~(Var (f n))
+    ; Zero u => \f => ~(Zero u)
+    ; Suc x => \f => ~(Suc (x f))
+    ; Rec x => \f => ~(Rec <Target: x.Target f; Zero: x.Zero f; Suc: x.Suc (shift f)>)
+    ; Abs x => \f => ~(Abs (x (shift f)))
+    ; App x => \f => ~(App <Fun: x.Fun f; Arg: x.Arg f>)
+    }
+in
+let pred (t : SystemTTerm) : SystemTTerm =
+  -- Term . Nat -> Term . Nat
+  ~(App
+     < Fun:
+       ~(Rec
+          < Target: t
+          ; Zero: ~(Abs ~(Zero <>))
+          ; Suc: \f ~>
+            ~(Abs
+               (\n ~>
+                 ~(Rec
+                    < Target: `n
+                    ; Zero: ~(Suc ~(App <Fun: `f; Arg: ~(Zero <>)>))
+                    ; Suc: \k ~> ~(App <Fun: `f; Arg: ~(Zero <>)>)
+                    >)))
+          >)
+     ; Arg: ~(Suc ~(Zero <>))
+     >)
+in
+let phase7 (t : Phase6Term) : SystemTTerm =
+  foldcase t by
+    { Var n => ~(Var n)
+    ; Zero u => ~(Zero u)
+    ; Suc t => ~(Suc t)
+    ; Rec x => ~(Rec x)
+    ; Abs t => ~(Abs t)
+    ; App x => ~(App x)
+    ; Let x => ~(App <Fun: ~(Abs x.Body); Arg: x.Bound>)
+    ; Arb ty => foldcase !ty by {N u => ~(Zero <>); C x => ~(Abs x.T)}
+    ; Max x =>
+      ~(App
+         < Fun:
+           ~(Rec
+              < Target: x.Left
+              ; Zero: ~(Abs (\n ~> `n))
+              ; Suc: \rec ~> ~(Abs (\n ~> ~(Suc ~(App <Fun: `rec; Arg: pred `n>))))
+              >)
+         ; Arg: x.Right
+         >)
+    ; IfEqual x =>
+      let lte
+            (lhs : SystemTTerm)
+            (rhs : SystemTTerm)
+            (true : SystemTTerm)
+            (false : SystemTTerm)
+            : SystemTTerm =
+        ~(App
+           < Fun:
+             ~(Rec
+                < Target: lhs
+                ; Zero: ~(Abs (\n ~> renameSystemT true (drop 1)))
+                ; Suc: \rec ~>
+                  ~(Abs
+                     (\n ~>
+                       ~(Rec
+                          < Target: `n
+                          ; Zero: renameSystemT false (drop 2)
+                          ; Suc: \bool ~> ~(App <Fun: `rec; Arg: pred `n>)
+                          >)))
+                >)
+           ; Arg: rhs
+           >)
+      in
+      lte x.Left x.Right (lte x.Right x.Left x.True x.False) x.False
+    ; Case x =>
+      let helper : Nat -> (Nat -> SystemTTerm) -> SystemTTerm =
+        -- |Δ| -> (|Θ| -> Term (Γ, Δ, Θ) Nat) -> Term (Γ, Δ) A
+        foldcase x.Cases by
+          { N u => \n, t => foldcase !(x.Type) by {N u => ~(Zero <>); C x => ~(Abs x.T)}
+          ; C x => \n, t =>
+            ~(Rec
+               <Target: t 0; Zero: renameSystemT x.H (drop n); Suc: x.T (suc n) (\k => t (suc k))>)
+          }
+      in
+      helper 0 (\n => renameSystemT x.Target (drop n))
+    ; Lit n => foldcase n by {Z u => ~(Zero u); S k => ~(Suc k)}
+    }
+in
+let compile (t : ArtystTerm) : SystemTTerm =
+  phase7 (phase6 (phase5 (phase4 (phase3 (phase2 (phase1 t))))))
+in
+compile

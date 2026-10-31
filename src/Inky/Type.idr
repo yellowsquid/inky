@@ -145,75 +145,83 @@ isFix (TFix x a) = Just (x ** a) `Because` Refl
 
 -- Thinning --------------------------------------------------------------------
 
-thin : ctx1 `Thins` ctx2 -> Ty ctx1 -> Ty ctx2
-thinAll : ctx1 `Thins` ctx2 -> Context (Ty ctx1) -> Context (Ty ctx2)
-thinAllNames :
+export
+rename : ctx1 `Thins` ctx2 -> Ty ctx1 -> Ty ctx2
+renameAll : ctx1 `Thins` ctx2 -> Context (Ty ctx1) -> Context (Ty ctx2)
+renameAllNames :
   (f : ctx1 `Thins` ctx2) ->
   (ctx : Context (Ty ctx1)) ->
-  (thinAll f ctx).names = ctx.names
+  (renameAll f ctx).names = ctx.names
 
-thin f (TVar i) = TVar (index f i)
-thin f (TArrow a b) = TArrow (thin f a) (thin f b)
-thin f (TProd (MkRow as fresh)) = TProd (MkRow (thinAll f as) (rewrite thinAllNames f as in fresh))
-thin f (TSum (MkRow as fresh)) = TSum (MkRow (thinAll f as) (rewrite thinAllNames f as in fresh))
-thin f (TFix x a) = TFix x (thin (Keep f) a)
+rename f (TVar i) = TVar (index f i)
+rename f (TArrow a b) = TArrow (rename f a) (rename f b)
+rename f (TProd (MkRow as fresh)) = TProd (MkRow (renameAll f as) (rewrite renameAllNames f as in fresh))
+rename f (TSum (MkRow as fresh)) = TSum (MkRow (renameAll f as) (rewrite renameAllNames f as in fresh))
+rename f (TFix x a) = TFix x (rename (Keep f) a)
 
-thinAll f [<] = [<]
-thinAll f (as :< (n :- a)) = thinAll f as :< (n :- thin f a)
+renameAll f [<] = [<]
+renameAll f (as :< (n :- a)) = renameAll f as :< (n :- rename f a)
 
-thinAllNames f [<] = Refl
-thinAllNames f (as :< (n :- a)) = cong (:< n) $ thinAllNames f as
+renameAllNames f [<] = Refl
+renameAllNames f (as :< (n :- a)) = cong (:< n) $ renameAllNames f as
 
 -- Renaming Coalgebra
 
-thinCong : f ~~~ g -> (a : Ty ctx1) -> thin f a = thin g a
-thinCongAll : f ~~~ g -> (as : Context (Ty ctx1)) -> thinAll f as = thinAll g as
+export
+renameCong : f ~~~ g -> (a : Ty ctx1) -> rename f a = rename g a
+renameCongAll : f ~~~ g -> (as : Context (Ty ctx1)) -> renameAll f as = renameAll g as
 
-thinCong prf (TVar i) = cong TVar (prf.index i)
-thinCong prf (TArrow a b) = cong2 TArrow (thinCong prf a) (thinCong prf b)
-thinCong prf (TProd (MkRow as fresh)) = cong TProd (rowCong $ thinCongAll prf as)
-thinCong prf (TSum (MkRow as fresh)) = cong TSum (rowCong $ thinCongAll prf as)
-thinCong prf (TFix x a) = cong (TFix x) (thinCong (KeepKeep prf) a)
+renameCong prf (TVar i) = cong TVar (prf.index i)
+renameCong prf (TArrow a b) = cong2 TArrow (renameCong prf a) (renameCong prf b)
+renameCong prf (TProd (MkRow as fresh)) = cong TProd (rowCong $ renameCongAll prf as)
+renameCong prf (TSum (MkRow as fresh)) = cong TSum (rowCong $ renameCongAll prf as)
+renameCong prf (TFix x a) = cong (TFix x) (renameCong (KeepKeep prf) a)
 
-thinCongAll prf [<] = Refl
-thinCongAll prf (as :< (n :- a)) =
-  cong2 (:<) (thinCongAll prf as) (cong (n :-) $ thinCong prf a)
+renameCongAll prf [<] = Refl
+renameCongAll prf (as :< (n :- a)) =
+  cong2 (:<) (renameCongAll prf as) (cong (n :-) $ renameCong prf a)
 
-thinId : (a : Ty ctx) -> thin Id a = a
-thinIdAll : (as : Context (Ty ctx)) -> thinAll Id as = as
+export
+renameId : (a : Ty ctx) -> rename Id a = a
+renameIdAll : (as : Context (Ty ctx)) -> renameAll Id as = as
 
-thinId (TVar (%% x)) = Refl
-thinId (TArrow a b) = cong2 TArrow (thinId a) (thinId b)
-thinId (TProd (MkRow as fresh)) = cong TProd (rowCong $ thinIdAll as)
-thinId (TSum (MkRow as fresh)) = cong TSum (rowCong $ thinIdAll as)
-thinId (TFix x a) = cong (TFix x) (trans (thinCong (KeepId IdId) a) (thinId a))
+renameId (TVar (%% x)) = Refl
+renameId (TArrow a b) = cong2 TArrow (renameId a) (renameId b)
+renameId (TProd (MkRow as fresh)) = cong TProd (rowCong $ renameIdAll as)
+renameId (TSum (MkRow as fresh)) = cong TSum (rowCong $ renameIdAll as)
+renameId (TFix x a) = cong (TFix x) (trans (renameCong (KeepId IdId) a) (renameId a))
 
-thinIdAll [<] = Refl
-thinIdAll (as :< (n :- a)) = cong2 (:<) (thinIdAll as) (cong (n :-) $ thinId a)
+renameIdAll [<] = Refl
+renameIdAll (as :< (n :- a)) = cong2 (:<) (renameIdAll as) (cong (n :-) $ renameId a)
 
-thinHomo :
+export
+renameHomo :
   (f : ctx2 `Thins` ctx3) -> (g : ctx1 `Thins` ctx2) -> (a : Ty ctx1) ->
-  thin f (thin g a) = thin (f . g) a
-thinHomoAll :
+  rename f (rename g a) = rename (f . g) a
+renameHomoAll :
   (f : ctx2 `Thins` ctx3) -> (g : ctx1 `Thins` ctx2) -> (as : Context (Ty ctx1)) ->
-  thinAll f (thinAll g as) = thinAll (f . g) as
+  renameAll f (renameAll g as) = renameAll (f . g) as
 
-thinHomo f g (TVar i) = cong (TVar . toVar) $ sym $ indexPosComp f g i.pos
-thinHomo f g (TArrow a b) = cong2 TArrow (thinHomo f g a) (thinHomo f g b)
-thinHomo f g (TProd (MkRow as fresh)) = cong TProd $ rowCong $ thinHomoAll f g as
-thinHomo f g (TSum (MkRow as fresh)) = cong TSum $ rowCong $ thinHomoAll f g as
-thinHomo f g (TFix x a) = cong (TFix x) $ thinHomo (Keep f) (Keep g) a
+renameHomo f g (TVar i) = cong (TVar . toVar) $ sym $ indexPosComp f g i.pos
+renameHomo f g (TArrow a b) = cong2 TArrow (renameHomo f g a) (renameHomo f g b)
+renameHomo f g (TProd (MkRow as fresh)) = cong TProd $ rowCong $ renameHomoAll f g as
+renameHomo f g (TSum (MkRow as fresh)) = cong TSum $ rowCong $ renameHomoAll f g as
+renameHomo f g (TFix x a) = cong (TFix x) $ renameHomo (Keep f) (Keep g) a
 
-thinHomoAll f g [<] = Refl
-thinHomoAll f g (as :< (n :- a)) =
-  cong2 (:<) (thinHomoAll f g as) (cong (n :-) $ thinHomo f g a)
+renameHomoAll f g [<] = Refl
+renameHomoAll f g (as :< (n :- a)) =
+  cong2 (:<) (renameHomoAll f g as) (cong (n :-) $ renameHomo f g a)
 
-public export
-Rename String Ty where
-  rename = thin
-  renameCong = thinCong
-  renameId = thinId
-  renameHomo = thinHomo
+-- public export
+-- Rename String Ty where
+--   rename = ?foo_1
+--   renameCong = ?foo_2
+--   renameId = ?foo_3
+--   renameHomo = ?foo_4
+-- --   rename = thin
+-- --   renameCong = thinCong
+-- --   renameId = thinId
+-- --   renameHomo = thinHomo
 
 -- Alpha Equivalence ------------------------------------------------------------
 
@@ -520,7 +528,7 @@ allAlpha (as :< (n :- a)) bs =
   map
     (\((b ** i) ** (prf1, prf2)) => Step i prf1 prf2)
     (either Step1 false) $
-  (bi := (decLookup n bs).forget) >=>
+  (bi <- (decLookup n bs).forget) >=>
   all (alpha a $ fst bi) (allAlpha as (dropElem bs $ snd bi))
   where
   p : (b ** Elem (n :- b) bs) -> Type
@@ -560,8 +568,8 @@ strengthenAllNames : StrengthenAll i as bs -> bs.names = as.names
 strengthenAllNames [<] = Refl
 strengthenAllNames ((:<) prfs {l} prf) = cong (:< l) (strengthenAllNames prfs)
 
-strengthenEq : Strengthen i a b -> a = thin (dropPos i.pos) b
-strengthenAllEq : StrengthenAll i as bs -> as = thinAll (dropPos i.pos) bs
+strengthenEq : Strengthen i a b -> a = rename (dropPos i.pos) b
+strengthenAllEq : StrengthenAll i as bs -> as = renameAll (dropPos i.pos) bs
 
 strengthenEq (TVar prf) = cong TVar prf
 strengthenEq (TArrow prf1 prf2) = cong2 TArrow (strengthenEq prf1) (strengthenEq prf2)
@@ -843,6 +851,16 @@ allWellFormed (as :< (n :- a)) =
 --------------------------------------------------------------------------------
 
 public export
+(.extract) : Thinned Ty ctx -> Ty ctx
+thinned.extract = rename thinned.thins thinned.value
+
+export
+0 extractHomo :
+  (f : ctx1 `Thins` ctx2) -> (x : Thinned Ty ctx1) ->
+  rename f x.extract = (rename f x).extract
+extractHomo f x = renameHomo f x.thins x.value
+
+public export
 sub' : All (Assoc0 $ Thinned Ty ctx2) ctx1 -> Ty ctx1 -> Ty ctx2
 public export
 subAll : All (Assoc0 $ Thinned Ty ctx2) ctx1 -> Context (Ty ctx1) -> Context (Ty ctx2)
@@ -880,7 +898,7 @@ TList : Ty ctx -> Ty ctx
 TList a =
   TFix "List" (TSum
     [<"N" :- TProd [<]
-    , "C" :- TProd [<"H" :- thin (Drop Id) a, "T" :- TVar (%% "List")]])
+    , "C" :- TProd [<"H" :- rename (Drop Id) a, "T" :- TVar (%% "List")]])
 
 -- Testing if we have a list
 

@@ -4,9 +4,9 @@ sourcedir = "src"
 
 options = "--total"
 
-depends = collie, contrib, flap
+depends = contrib, flap, getopts
 
-executable = inky
+executable = artyst
 main = Inky
 
 modules

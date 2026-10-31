@@ -57,12 +57,12 @@ skipsStrengthens :
   {f : ctx1 `Thins` ctx2} ->
   f `Skips` i.pos ->
   (a : Ty ctx1) ->
-  (b ** Strengthen i (thin f a) b)
+  (b ** Strengthen i (rename f a) b)
 skipsStrengthensAll :
   {f : ctx1 `Thins` ctx2} ->
   f `Skips` i.pos ->
   (as : Context (Ty ctx1)) ->
-  (bs ** (StrengthenAll i (thinAll f as) bs, bs.names = as.names))
+  (bs ** (StrengthenAll i (renameAll f as) bs, bs.names = as.names))
 
 skipsStrengthens skips (TVar j) =
   let (k ** eq) = strong f skips j.pos in
@@ -100,26 +100,26 @@ skipsStrengthensAll skips (as :< (l :- a)) =
   let (b ** prf) = skipsStrengthens skips a in
   (bs :< (l :- b) ** (prfs :< prf, cong (:< l) eq))
 
-thinStrengthen :
+renameStrengthen :
   (0 f : ctx1 `Thins` ctx2) ->
-  Strengthen i a b -> Strengthen (index f i) (thin f a) (thin (punchOut f i.pos) b)
-thinAllStrengthen :
+  Strengthen i a b -> Strengthen (index f i) (rename f a) (rename (punchOut f i.pos) b)
+renameAllStrengthen :
   (0 f : ctx1 `Thins` ctx2) ->
-  StrengthenAll i as bs -> StrengthenAll (index f i) (thinAll f as) (thinAll (punchOut f i.pos) bs)
+  StrengthenAll i as bs -> StrengthenAll (index f i) (renameAll f as) (renameAll (punchOut f i.pos) bs)
 
-thinStrengthen f (TVar {j, k} prf) =
+renameStrengthen f (TVar {j, k} prf) =
   TVar $
   rewrite sym $ indexPosComp (dropPos (indexPos f i.pos)) (punchOut f i.pos) k.pos in
   rewrite (punchOutHomo f i.pos).indexPos k.pos in
   rewrite indexPosComp f (dropPos i.pos) k.pos in
   cong (index f) prf
-thinStrengthen f (TArrow prf1 prf2) = TArrow (thinStrengthen f prf1) (thinStrengthen f prf2)
-thinStrengthen f (TProd {as = MkRow _ _, bs = MkRow _ _} prfs) = TProd (thinAllStrengthen f prfs)
-thinStrengthen f (TSum {as = MkRow _ _, bs = MkRow _ _} prfs) = TSum (thinAllStrengthen f prfs)
-thinStrengthen f (TFix prf) = TFix (thinStrengthen (Keep f) prf)
+renameStrengthen f (TArrow prf1 prf2) = TArrow (renameStrengthen f prf1) (renameStrengthen f prf2)
+renameStrengthen f (TProd {as = MkRow _ _, bs = MkRow _ _} prfs) = TProd (renameAllStrengthen f prfs)
+renameStrengthen f (TSum {as = MkRow _ _, bs = MkRow _ _} prfs) = TSum (renameAllStrengthen f prfs)
+renameStrengthen f (TFix prf) = TFix (renameStrengthen (Keep f) prf)
 
-thinAllStrengthen f [<] = [<]
-thinAllStrengthen f (prfs :< prf) = thinAllStrengthen f prfs :< thinStrengthen f prf
+renameAllStrengthen f [<] = [<]
+renameAllStrengthen f (prfs :< prf) = renameAllStrengthen f prfs :< renameStrengthen f prf
 
 sub'Strengthen :
   {a : Ty ctx1} ->
@@ -182,11 +182,11 @@ sub'Strengthen envStr (TFix {x} prf) =
       (ThereVar i = k)
   envStr' ((%%) _ {pos = Here}) = Just (TVar (%% x)) `Because` TVar Refl
   envStr' ((%%) name {pos = There k}) =
-    map (thin $ Drop Id)
+    map (rename $ Drop Id)
       (\b, prf =>
         rewrite getEnv0 k in
         rewrite sym $ extractHomo (Drop {x} Id) (indexAll k env).value in
-        thinStrengthen (Drop Id) prf)
+        renameStrengthen (Drop Id) prf)
       (\eq => cong ThereVar eq) $
     envStr (%% name)
 
@@ -198,24 +198,24 @@ subAllStrengthen envStr ((:<) prfs {l} prf) =
 
 -- Strict Positivity -----------------------------------------------------------
 
-thinStrictlyPositive :
+renameStrictlyPositive :
   (0 f : ctx1 `Thins` ctx2) ->
   i `StrictlyPositiveIn` a ->
-  index f i `StrictlyPositiveIn` thin f a
-thinAllStrictlyPositive :
+  index f i `StrictlyPositiveIn` rename f a
+renameAllStrictlyPositive :
   (0 f : ctx1 `Thins` ctx2) ->
   i `StrictlyPositiveInAll` as ->
-  index f i `StrictlyPositiveInAll` thinAll f as
+  index f i `StrictlyPositiveInAll` renameAll f as
 
-thinStrictlyPositive f TVar = TVar
-thinStrictlyPositive f (TArrow prf) = TArrow (thinStrengthen f prf)
-thinStrictlyPositive f (TProd {as = MkRow _ _} prfs) = TProd (thinAllStrictlyPositive f prfs)
-thinStrictlyPositive f (TSum {as = MkRow _ _} prfs) = TSum (thinAllStrictlyPositive f prfs)
-thinStrictlyPositive f (TFix prf) = TFix (thinStrictlyPositive (Keep f) prf)
+renameStrictlyPositive f TVar = TVar
+renameStrictlyPositive f (TArrow prf) = TArrow (renameStrengthen f prf)
+renameStrictlyPositive f (TProd {as = MkRow _ _} prfs) = TProd (renameAllStrictlyPositive f prfs)
+renameStrictlyPositive f (TSum {as = MkRow _ _} prfs) = TSum (renameAllStrictlyPositive f prfs)
+renameStrictlyPositive f (TFix prf) = TFix (renameStrictlyPositive (Keep f) prf)
 
-thinAllStrictlyPositive f [<] = [<]
-thinAllStrictlyPositive f (prfs :< prf) =
-  thinAllStrictlyPositive f prfs :< thinStrictlyPositive f prf
+renameAllStrictlyPositive f [<] = [<]
+renameAllStrictlyPositive f (prfs :< prf) =
+  renameAllStrictlyPositive f prfs :< renameStrictlyPositive f prf
 
 sub'StrictlyPositive :
   {a : Ty ctx1} ->
@@ -269,17 +269,16 @@ sub'StrictlyPositive envSp (TFix {x} prf) =
       (ThereVar i = k, ThereVar j `StrictlyPositiveIn` (getEnv' k))
   envSp' ((%%) _ {pos = Here}) = Just (TVar (%% x)) `Because` TVar Refl
   envSp' ((%%) name {pos = There k}) =
-    map (thin $ Drop Id)
+    map (rename $ Drop Id)
       (\b, prf =>
         rewrite getEnv0 k in
         rewrite sym $ extractHomo (Drop {x} Id) (indexAll k env).value in
-        thinStrengthen (Drop Id) prf)
+        renameStrengthen (Drop Id) prf)
       (\(eq, prf) =>
         ( cong ThereVar eq
         , rewrite getEnv0 k in
           rewrite sym $ extractHomo (Drop {x} Id) (indexAll k env).value in
-          thinStrictlyPositive (Drop Id) prf
-        )) $
+          renameStrictlyPositive (Drop Id) prf)) $
     envSp (%% name)
 
 subAllStrictlyPositive envSp [<] = [<]
@@ -288,17 +287,17 @@ subAllStrictlyPositive envSp (prfs :< prf) =
 
 -- Well Formedness -------------------------------------------------------------
 
-thinWf : (0 f : ctx1 `Thins` ctx2) -> WellFormed a -> WellFormed (thin f a)
-thinAllWf : (0 f : ctx1 `Thins` ctx2) -> AllWellFormed as -> AllWellFormed (thinAll f as)
+renameWf : (0 f : ctx1 `Thins` ctx2) -> WellFormed a -> WellFormed (rename f a)
+renameAllWf : (0 f : ctx1 `Thins` ctx2) -> AllWellFormed as -> AllWellFormed (renameAll f as)
 
-thinWf f TVar = TVar
-thinWf f (TArrow wf1 wf2) = TArrow (thinWf f wf1) (thinWf f wf2)
-thinWf f (TProd {as = MkRow _ _} wfs) = TProd (thinAllWf f wfs)
-thinWf f (TSum {as = MkRow _ _} wfs) = TSum (thinAllWf f wfs)
-thinWf f (TFix prf wf) = TFix (thinStrictlyPositive (Keep f) prf) (thinWf (Keep f) wf)
+renameWf f TVar = TVar
+renameWf f (TArrow wf1 wf2) = TArrow (renameWf f wf1) (renameWf f wf2)
+renameWf f (TProd {as = MkRow _ _} wfs) = TProd (renameAllWf f wfs)
+renameWf f (TSum {as = MkRow _ _} wfs) = TSum (renameAllWf f wfs)
+renameWf f (TFix prf wf) = TFix (renameStrictlyPositive (Keep f) prf) (renameWf (Keep f) wf)
 
-thinAllWf f [<] = [<]
-thinAllWf f (wfs :< wf) = thinAllWf f wfs :< thinWf f wf
+renameAllWf f [<] = [<]
+renameAllWf f (wfs :< wf) = renameAllWf f wfs :< renameWf f wf
 
 sub'Wf :
   {a : Ty ctx1} ->
@@ -314,7 +313,7 @@ subAllWf :
   AllWellFormed (subAll env as)
 
 sub'Wf envWf (TVar {i}) =
-  thinWf (indexAll i.pos env).value.thins (indexDAll i.pos envWf)
+  renameWf (indexAll i.pos env).value.thins (indexDAll i.pos envWf)
 sub'Wf envWf (TArrow wf1 wf2) = TArrow (sub'Wf envWf wf1) (sub'Wf envWf wf2)
 sub'Wf envWf (TProd {as = MkRow _ _} wfs) = TProd (subAllWf envWf wfs)
 sub'Wf envWf (TSum {as = MkRow _ _} wfs) = TSum (subAllWf envWf wfs)

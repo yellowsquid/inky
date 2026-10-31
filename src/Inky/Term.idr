@@ -182,7 +182,7 @@ isFunction (x :: bound) a =
     (\y => ((x :- fst (fst y)) :: fst (snd y), snd (snd y)))
     (\((a, b), (dom, cod)), (eq, prf) => rewrite eq in Step prf)
     (either Step1 false) $
-  (ab := isArrow a) >=> isFunction bound (snd ab)
+  (ab <- isArrow a) >=> isFunction bound (snd ab)
   where
   false :
     forall a.

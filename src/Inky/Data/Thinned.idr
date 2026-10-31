@@ -17,9 +17,9 @@ public export
 (.extract) : Rename a p => Thinned p ctx -> p ctx
 v.extract = rename v.thins v.value
 
-export
-0 extractHomo :
-  Rename a p =>
-  (f : ctx1 `Thins` ctx2) -> (x : Thinned p ctx1) ->
-  rename f x.extract = (rename f x).extract
-extractHomo f x = renameHomo f x.thins x.value
+-- export
+-- 0 extractHomo :
+--   Rename a p =>
+--   (f : ctx1 `Thins` ctx2) -> (x : Thinned p ctx1) ->
+--   rename f x.extract = (rename f x).extract
+-- extractHomo f x = renameHomo f x.thins x.value

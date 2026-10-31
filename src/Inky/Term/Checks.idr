@@ -205,7 +205,7 @@ fallbackCheck prf p a =
   map
     (\xPrf => uncurry (EmbedC prf) $ snd xPrf)
     (either (EmbedNC1 prf) (\xPrf => uncurry (EmbedNC2 prf) $ snd xPrf)) $
-  (b := p) >=> alpha b a
+  (b <- p) >=> alpha b a
 
 export
 synths :
@@ -258,7 +258,7 @@ synths tyEnv tmEnv (Let _ e (x ** f)) =
   map snd
     (\(_, _), (prf1, prf2) => LetS prf1 prf2)
     (either LetNS1 (\xPrfs => uncurry LetNS2 (snd xPrfs))) $
-  (a := synths tyEnv tmEnv e) >=> synths tyEnv (tmEnv :< (x :- a)) f
+  (a <- synths tyEnv tmEnv e) >=> synths tyEnv (tmEnv :< (x :- a)) f
 synths tyEnv tmEnv (LetTy _ a (x ** e)) =
   map id (\_, (wf, prf) => LetTyS wf prf) LetTyNS $
   all (wellFormed a) (synths (tyEnv :< (x :- sub tyEnv a)) tmEnv e)
@@ -267,14 +267,14 @@ synths tyEnv tmEnv (App _ e ts) =
   map snd
     (\(_, _), (prf1, prf2) => AppS prf1 prf2)
     (either AppNS1 (\xPrfs => uncurry AppNS2 (snd xPrfs))) $
-  (a := synths tyEnv tmEnv e) >=> checkSpine tyEnv tmEnv a ts
+  (a <- synths tyEnv tmEnv e) >=> checkSpine tyEnv tmEnv a ts
 synths tyEnv tmEnv (Tup _ (MkRow es fresh)) =
   map (TProd . fst) (\_ => TupS) TupNS $
   allSynths tyEnv tmEnv es fresh
 synths tyEnv tmEnv (Prj meta e l) =
   map (snd . snd) true false $
-  (a := synths tyEnv tmEnv e) >=>
-  (as := isProd a) >=>
+  (a <- synths tyEnv tmEnv e) >=>
+  (as <- isProd a) >=>
   decLookup l as.context
   where
   true :
@@ -334,7 +334,7 @@ checks tyEnv tmEnv a (Let _ e (x ** t)) =
   map
     (\(_ ** (prf1, prf2)) => LetC prf1 prf2)
     (either LetNC1 (\xPrfs => uncurry LetNC2 $ snd xPrfs)) $
-  (b := synths tyEnv tmEnv e) >=> checks tyEnv (tmEnv :< (x :- b)) a t
+  (b <- synths tyEnv tmEnv e) >=> checks tyEnv (tmEnv :< (x :- b)) a t
 checks tyEnv tmEnv a (LetTy _ b (x ** t)) =
   map (uncurry LetTyC) LetTyNC $
   all (wellFormed b) (checks (tyEnv :< (x :- sub tyEnv b)) tmEnv a t)
@@ -342,7 +342,7 @@ checks tyEnv tmEnv a (Abs meta (bound ** t)) =
   map
     (\((_, _) ** (prf1, prf2)) => AbsC prf1 prf2)
     (either AbsNC1 false) $
-  (domCod := isFunction bound a) >=>
+  (domCod <- isFunction bound a) >=>
   checks tyEnv (tmEnv <>< fst domCod) (snd domCod) t
   where
   false :
@@ -352,7 +352,7 @@ checks tyEnv tmEnv a (Abs meta (bound ** t)) =
 checks tyEnv tmEnv a (App meta f ts) = fallbackCheck App (synths tyEnv tmEnv $ App meta f ts) a
 checks tyEnv tmEnv a (Tup _ (MkRow ts fresh')) =
   map true false $
-  (as := isProd a) >=> allChecks tyEnv tmEnv as.context ts
+  (as <- isProd a) >=> allChecks tyEnv tmEnv as.context ts
   where
   true :
     forall a.
@@ -371,8 +371,8 @@ checks tyEnv tmEnv a (Tup _ (MkRow ts fresh')) =
 checks tyEnv tmEnv a (Prj meta e l) = fallbackCheck Prj (synths tyEnv tmEnv $ Prj meta e l) a
 checks tyEnv tmEnv a (Inj _ l t) =
   map true false $
-  (as := isSum a) >=>
-  (b := decLookup l as.context) >=>
+  (as <- isSum a) >=>
+  (b <- decLookup l as.context) >=>
   checks tyEnv tmEnv b t
   where
   true :
@@ -395,8 +395,8 @@ checks tyEnv tmEnv a (Inj _ l t) =
   false (Right (as ** (Refl, Right (b ** (i, contra))))) = InjNC3 i contra
 checks tyEnv tmEnv a (Case _ e (MkRow ts fresh)) =
   map true false $
-  (b := synths tyEnv tmEnv e) >=>
-  (as := isSum b) >=>
+  (b <- synths tyEnv tmEnv e) >=>
+  (as <- isSum b) >=>
   allBranches tyEnv tmEnv as.context a ts
   where
   true :
@@ -419,7 +419,7 @@ checks tyEnv tmEnv a (Case _ e (MkRow ts fresh)) =
   false (Right (.(TSum as) ** (prf, Right (as ** (Refl, contras))))) = CaseNC3 prf contras
 checks tyEnv tmEnv a (Roll _ t) =
   map true false $
-  (xb := isFix a) >=> checks tyEnv tmEnv (ty xb) t
+  (xb <- isFix a) >=> checks tyEnv tmEnv (ty xb) t
   where
   ty : (x ** Ty [<x]) -> Ty [<]
   ty (x ** b) = sub [<x :- TFix x b] b
@@ -441,8 +441,8 @@ checks tyEnv tmEnv a (Roll _ t) =
 checks tyEnv tmEnv a (Unroll meta e) = fallbackCheck Unroll (synths tyEnv tmEnv $ Unroll meta e) a
 checks tyEnv tmEnv a (Fold _ e (x ** t)) =
   map true false $
-  (b := synths tyEnv tmEnv e) >=>
-  (yc := isFix b) >=>
+  (b <- synths tyEnv tmEnv e) >=>
+  (yc <- isFix b) >=>
   checks tyEnv (tmEnv' yc) a t
   where
   tmEnv' : (y ** Ty [<y]) -> All (Assoc0 $ Ty [<]) (tmCtx :< x)
@@ -471,7 +471,7 @@ checks tyEnv tmEnv a (Map meta (x ** b) c d) =
 checkSpine tyEnv tmEnv a [] = Just a `Because` []
 checkSpine tyEnv tmEnv a (t :: ts) =
   map snd true false $
-  (bc := isArrow a) >=>
+  (bc <- isArrow a) >=>
   all (checks tyEnv tmEnv (fst bc) t) (checkSpine tyEnv tmEnv (snd bc) ts)
   where
   true :
@@ -509,7 +509,7 @@ allChecks tyEnv tmEnv as (ts :< (l :- t)) =
   map
     (\((a ** i) ** (prf, prfs)) => Step i prf prfs)
     (either Step1 (\xPrf => Step2 (snd $ fst xPrf) (snd xPrf))) $
-  (ai := (decLookup l as).forget) >=>
+  (ai <- (decLookup l as).forget) >=>
   all (checks tyEnv tmEnv (fst ai) t) (allChecks tyEnv tmEnv (dropElem as $ snd ai) ts)
 
 allBranches tyEnv tmEnv [<] b [<] = True `Because` Base
@@ -518,7 +518,7 @@ allBranches tyEnv tmEnv as b (ts :< (l :- (x ** t))) =
   map
     (\((a ** i) ** (prf, prfs)) => Step i prf prfs)
     (either Step1 (\xPrf => Step2 (snd $ fst xPrf) (snd xPrf))) $
-  (ai := (decLookup l as).forget) >=>
+  (ai <- (decLookup l as).forget) >=>
   all
     (checks tyEnv (tmEnv :< (x :- fst ai)) b t)
     (allBranches tyEnv tmEnv (dropElem as $ snd ai) b ts)

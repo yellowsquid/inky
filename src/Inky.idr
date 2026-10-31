@@ -1,11 +1,10 @@
 module Inky
 
-import Collie
-
 import Control.App
 import Control.App.Console
 import Control.App.FileIO
 
+import Data.DPair
 import Data.String
 
 import Flap.Decidable
@@ -21,17 +20,20 @@ import Inky.Term.Pretty
 import Inky.Term.Pretty.Error
 import Inky.Type.Pretty
 
+import System
 import System.File.Mode
 import System.File.ReadWrite
 import System.File.Virtual
+import System.GetOpts
 
 import Text.Lexer
 import Text.PrettyPrint.Prettyprinter
 import Text.PrettyPrint.Prettyprinter.Render.Terminal
 
-%default partial
+%hide Flap.Data.SnocList.Thinning.(.)
 
-%hide Collie.Modifiers.infix.(::=)
+FilePath : Type
+FilePath = String
 
 record Erased (a : Type) where
   constructor Forget
@@ -57,6 +59,7 @@ Interpolation a => Interpolation (WithBounds a) where
 
 -- Actions ---------------------------------------------------------------------
 
+partial
 readFile : FileIO es => File -> App es String
 readFile f = do
   content <- read [<] f
@@ -69,6 +72,7 @@ readFile f = do
     str <- fGetStr f
     read (acc :< str) f
 
+partial
 readFileOrStdin : FileIO es => HasErr IOError es => Maybe FilePath -> App es String
 readFileOrStdin Nothing = readFile stdin
 readFileOrStdin (Just path) = withFile path Read throw readFile
@@ -97,6 +101,7 @@ doParse p toks s =
     SoftErr errs _ _ => throw errs
     Err errs => throw errs
 
+partial
 parseType :
   Has
     [ HasErr (WithBounds String)
@@ -111,6 +116,7 @@ parseType path = do
   toks <- lexInkyString txt
   doParse OpenType toks [<]
 
+partial
 parseTerm :
   Has
     [ HasErr (WithBounds String)
@@ -145,165 +151,299 @@ synthTerm t = do
     | Nothing `Because` contra => throw (UhOh t contra)
   pure (Element a prf)
 
-printType :
-  PrimIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
-  Ty [<] -> App es ()
-printType a = do
-  primIO $ renderIO $ layoutSmart opts $ prettyType a Open
+writeFile : FileIO es => File -> SimpleDocStream Void -> App es ()
+writeFile file SEmpty = pure ()
+writeFile file (SChar c rest) = do fPutStr file (pack [c]); writeFile file rest
+writeFile file (SText len text rest) = do fPutStr file text; writeFile file rest
+writeFile file (SLine i rest) = do fPutStr file (strCons '\n' $ textSpaces i); writeFile file rest
+writeFile file (SAnnPop rest) = writeFile file rest
+
+openFile : FileIO es => Maybe String -> (File -> App es a) -> App es a
+openFile Nothing cont = cont stdout
+openFile (Just path) cont = withFile path WriteTruncate throw cont
 
 printTerm :
-  PrimIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
-  {mode : Term.Mode} -> Term mode m [<] [<] -> App es ()
-printTerm a = do
-  primIO $ renderIO $ layoutSmart opts $ prettyTerm a Open
+  FileIO es => (opts : LayoutOptions) ->
+  {mode : Term.Mode} -> Term mode m [<] [<] ->
+  (output : Maybe String) ->
+  App es ()
+printTerm opts a out =
+  openFile out $ \file =>
+    writeFile file $ layoutSmart opts $ prettyTerm a Open
 
 compileTerm :
-  PrimIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
+  FileIO es => {default defaultLayoutOptions opts : LayoutOptions} ->
   {t : Term NoSugar m [<] [<]} ->
   (0 prf : Synths [<] [<] t a) ->
+  (output : Maybe String) ->
   App es ()
-compileTerm prf =
-  primIO $ renderIO $ layoutSmart opts $
-  pretty "(use-modules (ice-9 match))" <+> line <+>
-  parens (hang 1 $ pretty "define main" <+> line <+> group (compileSynths [<] [<] prf))
-
+compileTerm prf out =
+  openFile out $ \file =>
+    writeFile file $ layoutSmart opts $
+      pretty "(use-modules (ice-9 match))" <+> line <+>
+      parens (hang 1 $ pretty "define main" <+> line <+> group (compileSynths [<] [<] prf))
 
 -- Arguments -------------------------------------------------------------------
 
-Inky : Command "inky"
-Inky = MkCommand
-  { description = """
-    tool suite for Primrose programs
-    """
-  , subcommands =
-    [ "--help" ::= basic "print this help text" none
-    , "format" ::= MkCommand
-      { description = """
-        pretty print data
-        """
-      , subcommands =
-        [ "type" ::= basic "print a type" filePath
-        , "term" ::= MkCommand
-          { description = "print a term"
-          , subcommands = []
-          , modifiers = ["--desugar" ::= flag "desugar the term"]
-          , arguments = filePath
-          }
-        ]
-      , modifiers = []
-      , arguments = none
-      }
-    , "check" ::= MkCommand
-      { description = """
-        check well-formedness
-        """
-      , subcommands =
-        [ "type" ::= basic "check a type" filePath
-        , "term" ::= MkCommand
-          { description = "check a term"
-          , subcommands = []
-          , modifiers = ["--type" ::= option "type to check against" filePath]
-          , arguments = filePath
-          }
-        ]
-      , modifiers = []
-      , arguments = none
-      }
-    , "compile" ::= MkCommand
-      { description = """
-        compile to scheme
-        """
-      , subcommands =
-        [ "term" ::= MkCommand
-          { description = "compile a term"
-          , subcommands = []
-          , modifiers = ["--type" ::= option "type to check against" filePath]
-          , arguments = filePath
-          }
-        ]
-      , modifiers = []
-      , arguments = none
-      }
-    ]
-  , modifiers = []
-  , arguments = none
+record GlobalOptions where
+  constructor MkGlobalOptions
+  help: Bool
+  version: Bool
+
+defaultGlobalOptions : GlobalOptions
+defaultGlobalOptions = MkGlobalOptions False False
+
+setHelp : GlobalOptions -> GlobalOptions
+setHelp = { help := True }
+
+setVersion : GlobalOptions -> GlobalOptions
+setVersion = { version := True }
+
+record FormatOptions where
+  constructor MkFormatOptions
+  global: GlobalOptions
+  width: Maybe Nat
+  desugar: Bool
+  output: Maybe FilePath
+
+defaultFormatOptions : FormatOptions
+defaultFormatOptions = MkFormatOptions
+  { global = defaultGlobalOptions
+  , width = Nothing
+  , desugar = False
+  , output = Nothing
   }
+
+record CheckOptions where
+  constructor MkCheckOptions
+  global: GlobalOptions
+  type: Maybe FilePath
+
+defaultCheckOptions : CheckOptions
+defaultCheckOptions = MkCheckOptions
+  { global = defaultGlobalOptions
+  , type = Nothing
+  }
+
+record CompileOptions where
+  constructor MkCompileOptions
+  global: GlobalOptions
+  type: Maybe FilePath
+  output: Maybe FilePath
+
+defaultCompileOptions : CompileOptions
+defaultCompileOptions = MkCompileOptions
+  { global = defaultGlobalOptions
+  , type = Nothing
+  , output = Nothing
+  }
+
+globalOptions : List (OptDescr (GlobalOptions -> GlobalOptions))
+globalOptions =
+  [ MkOpt ['h'] ["help"]
+    (NoArg $ the (GlobalOptions -> GlobalOptions) setHelp)
+    "display this help and exit"
+  , MkOpt ['v'] ["version"]
+    (NoArg $ the (GlobalOptions -> GlobalOptions) setVersion)
+    "display version information and exit"
+  ]
+
+formatOptions : List (OptDescr (FormatOptions -> FormatOptions))
+formatOptions =
+  [ MkOpt ['h'] ["help"]
+    (NoArg $ the (FormatOptions -> FormatOptions) { global $= setHelp })
+    "display this help and exit"
+  , MkOpt ['v'] ["version"]
+    (NoArg $ the (FormatOptions -> FormatOptions) { global $= setVersion })
+    "display version information and exit"
+  , MkOpt [] ["width"]
+    (ReqArg' (\width =>
+        if all isDigit (unpack width) then
+          Right ({ width := Just (stringToNatOrZ width) })
+        else
+          Left "width must be an integer")
+      "WIDTH")
+    "set maximum width of lines to WIDTH"
+  , MkOpt [] ["desugar"] (NoArg $ the (FormatOptions -> FormatOptions) { desugar := True})
+    "desugar the term before formatting"
+  , MkOpt ['o'] ["output"]
+    (ReqArg (\path => the (FormatOptions -> FormatOptions) { output := Just path }) "FILE")
+    "output to FILE"
+  ]
+
+checkOptions : List (OptDescr (CheckOptions -> CheckOptions))
+checkOptions =
+  [ MkOpt ['h'] ["help"]
+    (NoArg $ the (CheckOptions -> CheckOptions) { global $= setHelp })
+    "display this help and exit"
+  , MkOpt ['v'] ["version"]
+    (NoArg $ the (CheckOptions -> CheckOptions) { global $= setVersion })
+    "display version information and exit"
+  , MkOpt [] ["type"]
+    (ReqArg (\path => the (CheckOptions -> CheckOptions) { type := Just path }) "FILE")
+    "type check according to type in FILE"
+  ]
+
+compileOptions : List (OptDescr (CompileOptions -> CompileOptions))
+compileOptions =
+  [ MkOpt ['h'] ["help"]
+    (NoArg $ the (CompileOptions -> CompileOptions) { global $= setHelp })
+    "display this help and exit"
+  , MkOpt ['v'] ["version"]
+    (NoArg $ the (CompileOptions -> CompileOptions) { global $= setVersion })
+    "display version information and exit"
+  , MkOpt [] ["type"]
+    (ReqArg (\path => the (CompileOptions -> CompileOptions) { type := Just path }) "FILE")
+    "type check according to type in FILE"
+  , MkOpt ['o'] ["output"]
+    (ReqArg (\path => the (CompileOptions -> CompileOptions) { output := Just path }) "FILE")
+    "output to FILE"
+  ]
 
 -- Driver ----------------------------------------------------------------------
 
-showHelp : Console es => App es ()
-showHelp = putStrLn "Usage: \{Inky .usage}"
+data ProgramMode = Global | Format | Check | Compile
 
-process :
-  Has
-    [ HasErr String
-    , HasErr (WithBounds String)
-    , HasErr (List1 $ WithBounds String)
-    , HasErr (List1 $ ParseErr)
-    , HasErr (List1 ErrorMsg)
-    , HasErr SynthFailed
-    , FileIO
-    , PrimIO
-    ] es =>
-  App es ()
-process = do
-  Right args <- primIO (Inky).parseArgs
-    | Left msg => throw msg
-  let Pure args = ParsedTree.finalising args
-    | Fail errs => throw errs
-  Collie.handle {cmd = ("inky" ** Inky)} args
-    [ const showHelp
-    , "--help" ::= [ const showHelp ]
-    , "format" ::=
-      [ const showHelp
-      , "type" ::=
-        [ \cmd => do
-          let path = cmd.arguments
-          a <- parseType path
-          printType a
-        ]
-      , "term" ::=
-        [ \cmd => do
-          let path = cmd.arguments
-          t <- parseTerm path Nothing
-          let [noSugar] = cmd.modifiers.content
-          case noSugar of
-            True => printTerm (desugar t)
-            False => printTerm t
-        ]
-      ]
-    , "check" ::=
-      [ const showHelp
-      , "type" ::=
-        [ \cmd => do
-          let path = cmd.arguments
-          a <- parseType path
-          _ <- checkType a
-          pure ()
-        ]
-      , "term" ::=
-        [ \cmd => do
-          let path = cmd.arguments
-          let [type] = cmd.modifiers.content
-          t <- parseTerm path type
-          let t = desugar t
-          _ <- synthTerm t
-          pure ()
-        ]
-      ]
-    , "compile" ::=
-      [ const showHelp
-      , "term" ::=
-        [ \cmd => do
-          let path = cmd.arguments
-          let [type] = cmd.modifiers.content
-          t <- parseTerm path type
-          let t = desugar t
-          Element _ prf <- synthTerm t
-          compileTerm prf
-        ]
-      ]
-    ]
+Show ProgramMode where
+  show Global = ""
+  show Format = "format"
+  show Check = "check"
+  show Compile = "compile"
+
+ModeOptionTy : ProgramMode -> Type
+ModeOptionTy Global = GlobalOptions
+ModeOptionTy Format = FormatOptions
+ModeOptionTy Check = CheckOptions
+ModeOptionTy Compile = CompileOptions
+
+synopsis : ProgramMode -> String
+synopsis Global = "Manipulate and type check Artyst terms."
+synopsis Format = "Format Artyst terms."
+synopsis Check = "Type check Artyst terms."
+synopsis Compile = "Compile Artyst terms to Scheme."
+
+getGlobal : (mode : ProgramMode) -> ModeOptionTy mode -> GlobalOptions
+getGlobal Global = id
+getGlobal Format = (.global)
+getGlobal Check = (.global)
+getGlobal Compile = (.global)
+
+defaultOptions : (mode : ProgramMode) -> ModeOptionTy mode
+defaultOptions Global = defaultGlobalOptions
+defaultOptions Format = defaultFormatOptions
+defaultOptions Check = defaultCheckOptions
+defaultOptions Compile = defaultCompileOptions
+
+modeOptions : (mode : ProgramMode) -> List (OptDescr (ModeOptionTy mode -> ModeOptionTy mode))
+modeOptions Global = globalOptions
+modeOptions Format = formatOptions
+modeOptions Check = checkOptions
+modeOptions Compile = compileOptions
+
+data OptErr
+  = Errors (List1 String)
+  | Unrecognised (List1 String)
+  | ArgCount
+  | Help ProgramMode
+  | Version
+
+0 Errs : List Error
+Errs =
+  [ SynthFailed
+  , IOError
+  , WithBounds String
+  , List1 ParseErr
+  , List1 (WithBounds String)
+  , String
+  , List String
+  , OptErr
+  , AppHasIO
+  ]
+
+getPath : HasErr OptErr es => List String -> App es (Maybe String)
+getPath [] = pure Nothing
+getPath [path] = pure (Just path)
+getPath path = throw ArgCount
+
+handleGlobal : HasErr OptErr es => ProgramMode -> GlobalOptions -> App es ()
+handleGlobal mode global =
+  if global.help then
+     throw (Help mode)
+  else if global.version then
+     throw Version
+  else
+     pure ()
+
+processResult :
+  HasErr OptErr es =>
+  (mode : ProgramMode) -> Result (ModeOptionTy mode -> ModeOptionTy mode) ->
+  App es (ModeOptionTy mode, List String)
+processResult mode result = do
+  let [] = result.errors
+    | (err :: errs) => throw (Errors (err ::: errs))
+  let [] = result.unrecognized
+    | (err :: errs) => throw (Unrecognised (err ::: errs))
+  let opts = foldr (.) (\x => x) result.options (defaultOptions mode)
+  handleGlobal mode (getGlobal mode opts)
+  pure (opts, result.nonOptions)
+
+partial
+processFormat : FormatOptions -> Maybe String -> App Errs ()
+processFormat opts path = do
+  t <- parseTerm path Nothing
+  let layoutOpts = mkLayoutOpts opts
+  case opts.desugar of
+    True => printTerm layoutOpts (desugar t) opts.output
+    False => printTerm layoutOpts t opts.output
+  where
+  mkLayoutOpts : FormatOptions -> LayoutOptions
+  mkLayoutOpts opts =
+    let
+      setWidth : LayoutOptions -> LayoutOptions
+      setWidth =
+        maybe id
+          (\w => the (LayoutOptions -> LayoutOptions) { layoutPageWidth := AvailablePerLine (cast w) 1 })
+          opts.width
+    in
+    setWidth defaultLayoutOptions
+
+partial
+processCheck : CheckOptions -> Maybe String -> App Errs ()
+processCheck opts path = do
+  t <- parseTerm path opts.type
+  let t = desugar t
+  ignore (synthTerm t)
+
+partial
+processCompile : CompileOptions -> Maybe String -> App Errs ()
+processCompile opts path = do
+  t <- parseTerm path opts.type
+  let t = desugar t
+  Element _ prf <- synthTerm t
+  compileTerm prf opts.output
+
+partial
+Commands : List (String, (mode ** (ModeOptionTy mode -> Maybe String -> App Errs ())))
+Commands =
+  [ (show Format, (Format ** processFormat))
+  , (show Check, (Check ** processCheck))
+  , (show Compile, (Compile ** processCompile))
+  ]
+
+partial
+processGlobal : List String -> App Errs ()
+processGlobal args = do
+  let result = getOpt RequireOrder globalOptions args
+  (opts, args) <- processResult Global result
+  case args of
+    [] => throw (Help Global)
+    (cmd :: args) => case lookup cmd Commands of
+      Nothing => throw (Unrecognised (cmd ::: []))
+      Just (mode ** f) => do
+        let result = getOpt Permute (modeOptions mode) args
+        (opts, args) <- processResult mode result
+        path <- getPath args
+        f opts path
 
 handleErr : (0 e : Type) -> (forall a. e -> App es a) -> App (e :: es) a -> App es a
 handleErr e handler app = handle app pure handler
@@ -322,30 +462,21 @@ Interpolation (List InkyKind) where
   interpolate [t] = interpolate t
   interpolate ts = "one of " ++ joinBy ", " (map interpolate ts)
 
-main : IO ()
-main =
-  run {l = MayThrow} $
-  handleErr (List String)
-    (\msgs => do
+partial
+handleAllErrs : Maybe String -> App Errs () -> App [AppHasIO] ()
+handleAllErrs arg0 =
+  handleErr OptErr handleOptErr .
+  handleErr (List String) (\msgs => do
       foldlM (\_, msg => primIO $ () <$ fPutStrLn stderr msg) () msgs
-      primIO exitFailure) $
-  handleErr String
-    (throw . List.singleton) $
-  handleErr (List1 ErrorMsg)
-    (throw . map show . forget) $
-  handleErr (List1 $ WithBounds String)
-    (throw . map interpolate . forget) $
-  handleErr (List1 ParseErr)
-    (throw . map errToString . forget) $
-  handleErr (WithBounds String)
-    (throw . (::: [])) $
-  handleErr IOError
-    (throw . show) $
-  handleErr SynthFailed
-    (\err => do
+      primIO exitFailure) .
+  handleErr String (throw . List.singleton) .
+  handleErr (List1 $ WithBounds String) (throw . map interpolate . forget) .
+  handleErr (List1 ParseErr) (throw . map errToString . forget) .
+  handleErr (WithBounds String) (throw . (::: [])) .
+  handleErr IOError (throw . show) .
+  handleErr SynthFailed (\err => do
       printSynthFailed err
-      primIO exitFailure) $
-  process
+      primIO exitFailure)
   where
   errToString : ParseErr -> String
   errToString (BadEOF expected) = "expected \{expected}, got end of input"
@@ -362,3 +493,40 @@ main =
           (NeedsQuote mode) => "cannot use splicing here"
           NoQuotedTypes => "cannot write types within quotations"
     in interpolate (msg <$ e)
+
+  partial
+  handleOptErr : OptErr -> App [AppHasIO] a
+  handleOptErr (Errors errs) = do
+    traverse_ (primIO . ignore . fPutStrLn stderr) errs
+    primIO exitFailure
+  handleOptErr (Unrecognised errs) = do
+    traverse_ (primIO . ignore . fPutStrLn stderr . ("unrecognised option " ++)) errs
+    primIO exitFailure
+  handleOptErr ArgCount = do
+    primIO $ ignore $ fPutStrLn stderr "too many arguments"
+    primIO exitFailure
+  handleOptErr (Help Global) = do
+    putStr """
+    Usage: \{maybe "artyst" (last . split (== '/')) arg0} [COMMAND]
+    \{synopsis Global}
+      format   \{synopsis Format}
+      check    \{synopsis Check}
+      compile  \{synopsis Compile}
+    """
+    primIO exitSuccess
+  handleOptErr (Help mode) = do
+    putStr $ flip usageInfo (modeOptions mode) """
+    Usage: \{maybe "artyst" (last . split (== '/')) arg0} \{show mode} [OPTIONS]... [FILE]
+    \{synopsis mode}
+    """
+    primIO exitSuccess
+  handleOptErr Version = do
+    putStrLn "artyst (Artyst) 0.1.0"
+    primIO exitSuccess
+
+partial
+main : IO ()
+main = run {l = MayThrow} $ do
+  (cmd :: args) <- primIO getArgs
+    | [] => handleAllErrs Nothing (throw $ Help Global)
+  handleAllErrs (Just cmd) (processGlobal args)

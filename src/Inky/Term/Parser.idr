@@ -29,20 +29,13 @@ export
 data InkyKind
   = TermIdent
   | TypeIdent
-  | StringLit
-  | Lit
   | Let
   | In
   | Case
-  | Of
+  | With
   | FoldCase
   | Fold
-  | By
   | Data
-  | Nat
-  | List
-  | Suc
-  | Cons
   | Map
   | ParenOpen
   | ParenClose
@@ -54,10 +47,8 @@ data InkyKind
   | BraceClose
   | Arrow
   | DoubleArrow
-  | WaveArrow
   | Bang
   | Tilde
-  | Backtick
   | Dot
   | Backslash
   | Colon
@@ -71,20 +62,13 @@ export
 Eq InkyKind where
   TermIdent == TermIdent = True
   TypeIdent == TypeIdent = True
-  StringLit == StringLit = True
-  Lit == Lit = True
   Let == Let = True
   In == In = True
   Case == Case = True
-  Of == Of = True
+  With == With = True
   FoldCase == FoldCase = True
   Fold == Fold = True
-  By == By = True
   Data == Data = True
-  Nat == Nat = True
-  List == List = True
-  Suc == Suc = True
-  Cons == Cons = True
   Map == Map = True
   ParenOpen == ParenOpen = True
   ParenClose == ParenClose = True
@@ -96,10 +80,8 @@ Eq InkyKind where
   BraceClose == BraceClose = True
   Arrow == Arrow = True
   DoubleArrow == DoubleArrow = True
-  WaveArrow == WaveArrow = True
   Bang == Bang = True
   Tilde == Tilde = True
-  Backtick == Backtick = True
   Dot == Dot = True
   Backslash == Backslash = True
   Colon == Colon = True
@@ -114,20 +96,13 @@ export
 Interpolation InkyKind where
   interpolate TermIdent = "term name"
   interpolate TypeIdent = "type name"
-  interpolate StringLit = "string"
-  interpolate Lit = "number"
   interpolate Let = "'let'"
   interpolate In = "'in'"
-  interpolate Case = "'case'"
-  interpolate Of = "'of'"
-  interpolate FoldCase = "'foldcase'"
-  interpolate Fold = "'fold'"
-  interpolate By = "'by'"
+  interpolate Case = "'match'"
+  interpolate With = "'with'"
+  interpolate FoldCase = "'matchrec'"
+  interpolate Fold = "'rec'"
   interpolate Data = "'Data'"
-  interpolate Nat = "'Nat'"
-  interpolate List = "'List'"
-  interpolate Suc = "'suc'"
-  interpolate Cons = "'cons'"
   interpolate Map = "'map'"
   interpolate ParenOpen = "'('"
   interpolate ParenClose = "')'"
@@ -139,10 +114,8 @@ Interpolation InkyKind where
   interpolate BraceClose = "'}'"
   interpolate Arrow = "'->'"
   interpolate DoubleArrow = "'=>'"
-  interpolate WaveArrow = "'~>'"
   interpolate Bang = "'!'"
   interpolate Tilde = "'~'"
-  interpolate Backtick = "'`'"
   interpolate Dot = "'.'"
   interpolate Backslash = "'\\'"
   interpolate Colon = "':'"
@@ -155,27 +128,18 @@ Interpolation InkyKind where
 TokenKind InkyKind where
   TokType TermIdent = String
   TokType TypeIdent = String
-  TokType StringLit = String
-  TokType Lit = Nat
   TokType Comment = String
   TokType _ = ()
 
   tokValue TermIdent = id
   tokValue TypeIdent = id
-  tokValue StringLit = \str => substr 1 (length str `minus` 2) str
-  tokValue Lit = stringToNatOrZ
   tokValue Let = const ()
   tokValue In = const ()
   tokValue Case = const ()
-  tokValue Of = const ()
+  tokValue With = const ()
   tokValue FoldCase = const ()
   tokValue Fold = const ()
-  tokValue By = const ()
   tokValue Data = const ()
-  tokValue Nat = const ()
-  tokValue List = const ()
-  tokValue Suc = const ()
-  tokValue Cons = const ()
   tokValue Map = const ()
   tokValue ParenOpen = const ()
   tokValue ParenClose = const ()
@@ -187,10 +151,8 @@ TokenKind InkyKind where
   tokValue BraceClose = const ()
   tokValue Arrow = const ()
   tokValue DoubleArrow = const ()
-  tokValue WaveArrow = const ()
   tokValue Bang = const ()
   tokValue Tilde = const ()
-  tokValue Backtick = const ()
   tokValue Dot = const ()
   tokValue Backslash = const ()
   tokValue Colon = const ()
@@ -204,16 +166,11 @@ keywords : List (String, InkyKind)
 keywords =
   [ ("let", Let)
   , ("in", In)
-  , ("case", Case)
-  , ("of", Of)
-  , ("foldcase", FoldCase)
-  , ("fold", Fold)
-  , ("by", By)
+  , ("match", Case)
+  , ("with", With)
+  , ("matchrec", FoldCase)
+  , ("rec", Fold)
   , ("data", Data)
-  , ("Nat", Nat)
-  , ("List", List)
-  , ("suc", Suc)
-  , ("cons", Cons)
   , ("map", Map)
   ]
 
@@ -246,9 +203,7 @@ tokenMap =
       Just k => Tok k s
       Nothing => Tok TypeIdent s)] ++
   toTokenMap
-    [ (quote (is '"') alpha, StringLit)
-    , (digits, Lit)
-    , (exact "(", ParenOpen)
+    [ (exact "(", ParenOpen)
     , (exact ")", ParenClose)
     , (exact "[", BracketOpen)
     , (exact "]", BracketClose)
@@ -258,10 +213,8 @@ tokenMap =
     , (exact "}", BraceClose)
     , (exact "->", Arrow)
     , (exact "=>", DoubleArrow)
-    , (exact "~>", WaveArrow)
     , (exact "!", Bang)
     , (exact "~", Tilde)
-    , (exact "`", Backtick)
     , (exact ".", Dot)
     , (exact "\\", Backslash)
     , (exact ":", Colon)
@@ -574,8 +527,8 @@ CaseTerm : TermParser [<"openTerm"] [<]
 CaseTerm =
   Map (uncurry $ mkCase _) $
       WithBounds (
-         (match Case *> Var (%%% "openTerm") <* match Of) <||>
-         (match FoldCase *> Var (%%% "openTerm") <* match By))
+         (match Case *> Var (%%% "openTerm") <* match With) <||>
+         (match FoldCase *> Var (%%% "openTerm") <* match With))
   <**> Map mkRow
     (enclose (match BraceOpen) (match BraceClose)
       (sepBy (match Semicolon) $
@@ -598,7 +551,7 @@ CaseTerm =
 FoldTerm : TermParser [<"openTerm"] [<]
 FoldTerm =
   mkFold _ <$>
-    ( WithBounds (match Fold *> Var (%%% "openTerm") <* match By)
+    ( WithBounds (match Fold *> Var (%%% "openTerm") <* match With)
     <**>
       (\[x, u] => (x ** u)) <$>
       enclose (match ParenOpen) (match ParenClose)

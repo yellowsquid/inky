@@ -146,7 +146,7 @@ prettyTerm (Inj _ l t) d =
 prettyTerm (Case _ e (MkRow ts _)) d =
   let parts = prettyCases ts <>> [] in
   align $ hang 2 $ group $ parenthesise (d < Open) $
-    (group $ "case" <++> prettyTerm e Open <++> "of") <+> line <+>
+    (group $ "match" <++> prettyTerm e Open <++> "with") <+> line <+>
     (braces $ flatAlt
       (neutral <++> concatWith (surround $ line' <+> ";" <++> neutral) parts <+> line)
       (concatWith (surround $ ";" <++> neutral) parts))
@@ -156,7 +156,7 @@ prettyTerm (Unroll _ e) d =
   parenthesise (d < Prefix) $ align $ pretty "!" <+> prettyTerm e Prefix
 prettyTerm (Fold _ e (x ** t)) d =
   align $ hang 2 $ group $ parenthesise (d < Open) $
-    (hang (-2) $ group $ "fold" <++> prettyTerm e Open <++> "by") <+> line <+>
+    (hang (-2) $ group $ "rec" <++> prettyTerm e Open <++> "with") <+> line <+>
     (align $ hang 2 $ group $ parens $
       "\\" <+> pretty x <++> "=>" <+> line <+> prettyTerm t Open)
 prettyTerm (Map _ a b c) d =
@@ -170,7 +170,7 @@ prettyTerm (Map _ a b c) d =
 prettyTerm (FoldCase _ e (MkRow ts _)) d =
   let parts = prettyCases ts <>> [] in
   align $ hang 2 $ group $ parenthesise (d < Open) $
-    (group $ "foldcase" <++> prettyTerm e Open <++> "by") <+> line <+>
+    (group $ "matchrec" <++> prettyTerm e Open <++> "with") <+> line <+>
     (braces $ flatAlt
       (neutral <++> concatWith (surround $ line' <+> ";" <++> neutral) parts <+> line)
       (concatWith (surround $ ";" <++> neutral) parts))

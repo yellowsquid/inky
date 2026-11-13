@@ -586,3 +586,25 @@ allBranches tyEnv tmEnv as b (ts :< (l :- (x ** t))) =
   all
     (checks tyEnv (tmEnv :< (x :- fst ai)) b t)
     (allBranches tyEnv tmEnv (dropElem as $ snd ai) b ts)
+
+-- Synthesis and Checking are complete
+synthsComplete :
+  (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
+  (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
+  (e : Term m tyCtx tmCtx) ->
+  (prf : Synths tyEnv tmEnv e a) ->
+  (prf' ** (synths tyEnv tmEnv e = Just a `Because` prf'))
+synthsComplete tyEnv tmEnv e prf with (synths tyEnv tmEnv e)
+  _ | Just b `Because` prf' = rewrite synthsUnique prf prf' in (prf' ** Refl)
+  _ | Nothing `Because` contra = void $ synthsSplit prf contra
+
+checksComplete :
+  (tyEnv : All (Assoc0 $ Ty [<]) tyCtx) ->
+  (tmEnv : All (Assoc0 $ Ty [<]) tmCtx) ->
+  (a : Ty [<]) ->
+  (e : Term m tyCtx tmCtx) ->
+  (prf : Checks tyEnv tmEnv a e) ->
+  (prf' ** (checks tyEnv tmEnv a e = True `Because` prf'))
+checksComplete tyEnv tmEnv a e prf with (checks tyEnv tmEnv a e)
+  _ | True `Because` (Delay prf') = (prf' ** Refl)
+  _ | False `Because` contra = void $ checksSplit prf contra

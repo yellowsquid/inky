@@ -95,28 +95,8 @@ synthsSplit (MapS wf1 wf2 wf3) (MapNS contras) =
     (const $ these (wellFormedSplit wf2) (wellFormedSplit wf3) (const $ wellFormedSplit wf3))
     contras
 
-checksSplit (AnnotC prf1 prf2) (EmbedNC1 Annot contra) = synthsSplit prf1 contra
-checksSplit (VarC prf1 prf2) (EmbedNC1 Var contra) = synthsSplit prf1 contra
-checksSplit (AppC prf1 prf2) (EmbedNC1 App contra) = synthsSplit prf1 contra
-checksSplit (PrjC prf1 prf2) (EmbedNC1 Prj contra) = synthsSplit prf1 contra
-checksSplit (UnrollC prf1 prf2) (EmbedNC1 Unroll contra) = synthsSplit prf1 contra
-checksSplit (MapC prf1 prf2) (EmbedNC1 Map contra) = synthsSplit prf1 contra
-checksSplit (AnnotC prf1 prf2) (EmbedNC2 Annot prf1' contra) =
-  let contra = rewrite synthsUnique prf1 prf1' in contra in
-  alphaSplit prf2 contra
-checksSplit (VarC prf1 prf2) (EmbedNC2 Var prf1' contra) =
-  let contra = rewrite synthsUnique prf1 prf1' in contra in
-  alphaSplit prf2 contra
-checksSplit (AppC prf1 prf2) (EmbedNC2 App prf1' contra) =
-  let contra = rewrite synthsUnique prf1 prf1' in contra in
-  alphaSplit prf2 contra
-checksSplit (PrjC prf1 prf2) (EmbedNC2 Prj prf1' contra) =
-  let contra = rewrite synthsUnique prf1 prf1' in contra in
-  alphaSplit prf2 contra
-checksSplit (UnrollC prf1 prf2) (EmbedNC2 Unroll prf1' contra) =
-  let contra = rewrite synthsUnique prf1 prf1' in contra in
-  alphaSplit prf2 contra
-checksSplit (MapC prf1 prf2) (EmbedNC2 Map prf1' contra) =
+checksSplit (EmbedC _ prf1 prf2) (EmbedNC1 _ contra) = synthsSplit prf1 contra
+checksSplit (EmbedC _ prf1 prf2) (EmbedNC2 _ prf1' contra) =
   let contra = rewrite synthsUnique prf1 prf1' in contra in
   alphaSplit prf2 contra
 checksSplit (LetC prf1 prf2) (LetNC1 contra) = synthsSplit prf1 contra

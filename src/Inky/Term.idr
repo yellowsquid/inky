@@ -258,14 +258,11 @@ data Synths where
               (sub (tyEnv :< (x :- sub tyEnv c)) a)))
 
 data Checks where
-  AnnotC :
-    Synths tyEnv tmEnv (Annot meta t a) b ->
-    Alpha b c ->
-    Checks tyEnv tmEnv c (Annot meta t a)
-  VarC :
-    Synths tyEnv tmEnv (Var meta i) a ->
+  EmbedC :
+    SynthsOnly e ->
+    Synths tyEnv tmEnv e a ->
     Alpha a b ->
-    Checks tyEnv tmEnv b (Var meta i)
+    Checks tyEnv tmEnv b e
   LetC :
     Synths tyEnv tmEnv e a ->
     Checks tyEnv (tmEnv :< (x :- a)) b t ->
@@ -278,17 +275,9 @@ data Checks where
     IsFunction bound a dom cod ->
     Checks tyEnv (tmEnv <>< dom) cod t ->
     Checks tyEnv tmEnv a (Abs meta (bound ** t))
-  AppC :
-    Synths tyEnv tmEnv (App meta e ts) a ->
-    Alpha a b ->
-    Checks tyEnv tmEnv b (App meta e ts)
   TupC :
     AllChecks tyEnv tmEnv as.context ts.context ->
     Checks tyEnv tmEnv (TProd as) (Tup meta ts)
-  PrjC :
-    Synths tyEnv tmEnv (Prj meta e l) a ->
-    Alpha a b ->
-    Checks tyEnv tmEnv b (Prj meta e l)
   InjC :
     Elem (l :- a) as.context ->
     Checks tyEnv tmEnv a t ->
@@ -300,36 +289,14 @@ data Checks where
   RollC :
     Checks tyEnv tmEnv (sub [<x :- TFix x a] a) t ->
     Checks tyEnv tmEnv (TFix x a) (Roll meta t)
-  UnrollC :
-    Synths tyEnv tmEnv (Unroll meta e) a ->
-    Alpha a b ->
-    Checks tyEnv tmEnv b (Unroll meta e)
   FoldC :
     Synths tyEnv tmEnv e (TFix x a) ->
     Checks tyEnv (tmEnv :< (y :- sub [<x :- b] a)) b t ->
     Checks tyEnv tmEnv b (Fold meta e (y ** t))
-  MapC :
-    Synths tyEnv tmEnv (Map meta (x ** a) b c) d ->
-    Alpha d e ->
-    Checks tyEnv tmEnv e (Map meta (x ** a) b c)
   FoldCaseC :
     Synths tyEnv tmEnv e (TFix x (TSum as)) ->
     AllBranches tyEnv tmEnv (subAll [<_ :- b] as.context) b ts.context ->
     Checks tyEnv tmEnv b (FoldCase meta e ts)
-
-public export
-%inline
-EmbedC :
-  SynthsOnly e ->
-  Synths tyEnv tmEnv e a ->
-  Alpha a b ->
-  Checks tyEnv tmEnv b e
-EmbedC Annot prf1 prf2 = AnnotC prf1 prf2
-EmbedC Var prf1 prf2 = VarC prf1 prf2
-EmbedC App prf1 prf2 = AppC prf1 prf2
-EmbedC Prj prf1 prf2 = PrjC prf1 prf2
-EmbedC Unroll prf1 prf2 = UnrollC prf1 prf2
-EmbedC Map prf1 prf2 = MapC prf1 prf2
 
 %name Synths prf
 %name Checks prf

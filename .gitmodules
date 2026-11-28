@@ -1,0 +1,3 @@
+[submodule "idris-flap"]
+	path = idris-flap
+	url = https://github.com/yellowsquid/idris-flap

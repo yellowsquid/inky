@@ -1,4 +1,4 @@
-# Inky
+# Artyst
 
 See `program` for some examples.
 
@@ -9,6 +9,5 @@ See `program` for some examples.
 
 # Running
 
-- `inky format term` is a highly-opinionated, non-customizable code formatter.
-- `inky check term` type checks an expression, assuming its type is synthesizable.
-- `inky compile term` compiles a term to Guile Scheme.
+- `artyst format term` is a highly-opinionated, non-customizable code formatter.
+- `artyst check term` synthesises a type for a term. It returns a non-zero exit code on failure.

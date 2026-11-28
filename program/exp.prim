@@ -1,3 +1,0 @@
-let add (x : Nat) (y : Nat) : Nat = foldcase x by {Z u => y; S k => suc k} in
-let mul (x : Nat) (y : Nat) : Nat = foldcase x by {Z u => 0; S k => add y k} in
-\x, y => foldcase y by {Z u => 1; S k => mul x k}
